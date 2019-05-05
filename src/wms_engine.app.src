@@ -1,0 +1,15 @@
+{application, wms_engine,
+ [{description, "Workflow engine for WMS system"},
+  {vsn, git},
+  {registered, []},
+  {mod, {wms_engine_app, []}},
+  {applications,
+   [kernel,
+    stdlib
+   ]},
+  {env,[]},
+  {modules, [wms_engine_precomp, wms_engine_lang]},
+
+  {licenses, ["Apache 2.0"]},
+  {links, []}
+ ]}.
