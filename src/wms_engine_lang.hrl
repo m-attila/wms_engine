@@ -19,7 +19,7 @@ impl := atom(),
 executed := #{integer() := execution_result()}
 }.
 
--type step_state() :: UniqueID :: integer().
+-type step_state() :: UniqueID :: binary().
 
 %% -----------------------------------------------------------------------------
 %% Base types.
@@ -115,7 +115,7 @@ date_operations() | time_operations() | list_operations().
 -type comparator_op() :: '=' | '>' | '<' | '>=' | '<=' | '!='.
 -type comparator_expr() :: {variable_reference(),
                             comparator_op(), variable_or_literal()}.
--type bool_op() :: 'and' | 'or' | 'xor'.
+-type bool_op() :: set | 'and' | 'or' | 'xor'.
 -type logical_expr() :: [{bool_op(), comparator_expr()}].
 
 -type step() :: command() | interaction() | parallel().

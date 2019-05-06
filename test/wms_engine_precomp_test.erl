@@ -17,7 +17,7 @@ precompile_test() ->
   ?assertEqual({ok, []}, wms_engine_precomp:compile([])),
 
   NoStepRule = {rule, {logical_expr, []}},
-  Expected = {2, NoStepRule},
+  Expected = {<<"rule@1">>, NoStepRule},
 
   ?assertEqual({ok, [Expected]}, wms_engine_precomp:compile([NoStepRule])),
 
@@ -49,28 +49,46 @@ precompile_test() ->
 
   Expected1 =
     [
-      {10, {rule,
-           {logical_expr1, [
-             {7, {rule,
-                  {logical_expr2, [
-                    {1, {cmd, command2}},
-                    {2, {call, {a1, a2, a3}}},
-                    {5, {parallel, [
-                      {3, {call, {a11, a12, a13}}},
-                      {4, {call, {a21, a22, a23}}}
-                    ]}}
-                  ]}}
-             },
-             {8, {cmd, command1}}
-           ]}}
+      {<<"rule@1">>, {rule,
+                      {logical_expr1, [
+                        {<<"rule@1_rule@1">>,
+                         {rule,
+                          {logical_expr2, [
+                            {<<"rule@1_rule@1_cmd@1">>,
+                             {cmd, command2}},
+                            {<<"rule@1_rule@1_call@1">>,
+                             {call, {a1, a2, a3}}},
+                            {<<"rule@1_rule@1_parallel@1">>,
+                             {parallel, [
+                               {<<"rule@1_rule@1_parallel@1_call@1">>,
+                                {call, {a11, a12, a13}}},
+                               {<<"rule@1_rule@1_parallel@1_call@2">>,
+                                {call, {a21, a22, a23}}}
+                             ]}}
+                          ]}}
+                        },
+                        {<<"rule@1_cmd@1">>, {cmd, command1}}
+                      ]}}
       },
-      {14, {rule,
-            {logical_expr2, [
-              {11, {call, {a31, a32, a33}}},
-              {12, {call, {a41, a42, a43}}}
-            ]}}
+      {<<"rule@2">>, {rule,
+                      {logical_expr2, [
+                        {<<"rule@2_call@1">>, {call, {a31, a32, a33}}},
+                        {<<"rule@2_call@2">>, {call, {a41, a42, a43}}}
+                      ]}}
       }
     ],
 
   Rules = [Rule1, Rule2],
-  ?assertEqual({ok, Expected1}, wms_engine_precomp:compile(Rules)).
+  ?assertEqual({ok, Expected1}, wms_engine_precomp:compile(Rules)),
+
+  ExpectedRules = lists:sort(
+    [<<"rule@1">>, <<"rule@1_le">>,
+     <<"rule@1_rule@1">>, <<"rule@1_rule@1_le">>,
+     <<"rule@1_rule@1_cmd@1">>,
+     <<"rule@1_rule@1_call@1">>, <<"rule@1_rule@1_parallel@1">>,
+     <<"rule@1_rule@1_parallel@1_call@1">>, <<"rule@1_rule@1_parallel@1_call@2">>,
+     <<"rule@1_cmd@1">>,
+     <<"rule@2">>, <<"rule@2_le">>,
+     <<"rule@2_call@1">>, <<"rule@2_call@2">>]),
+  ?assertEqual(ExpectedRules,
+               lists:sort(wms_engine_precomp:get_ids(Expected1))).

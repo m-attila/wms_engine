@@ -10,12 +10,17 @@
 -author("Attila Makra").
 -include("wms_engine_lang.hrl").
 
+-ifdef(TEST).
+-compile([export_all]).
+-endif.
+
 %% API
 -export([execute/2]).
 
 %% =============================================================================
 %% Types
 %% =============================================================================
+-type tree_state() :: undefined | boolean().
 
 %% =============================================================================
 %% Callbacks
@@ -73,12 +78,12 @@ execute_entry({ID, _} = Entry, #{impl := Impl} = State) ->
   ok = Impl:save_state(NewState1),
   {ok, NewState1}.
 
--spec get_execution_result(integer(), engine_state()) ->
+-spec get_execution_result(binary(), engine_state()) ->
   execution_result() | undefined.
 get_execution_result(ID, #{executed := Executed}) ->
   maps:get(ID, Executed, undefined).
 
--spec store_execution_result(integer(), term(), engine_state()) ->
+-spec store_execution_result(binary(), term(), engine_state()) ->
   engine_state().
 store_execution_result(ID, Result, #{executed := Executed} = State) ->
   State#{executed := Executed#{ID => Result}}.
@@ -87,12 +92,13 @@ store_execution_result(ID, Result, #{executed := Executed} = State) ->
 %% Execute entry implementations
 %% -----------------------------------------------------------------------------
 
--spec execute_entry(compiled_entry(), execution_result() | undefined, engine_state()) ->
-  {ok, execution_result(), engine_state()}.
+-spec execute_entry(compiled_entry(),
+                    execution_result() | undefined, engine_state()) ->
+                     {ok, execution_result(), engine_state()}.
 execute_entry({ID, {rule, {LogicalExpression, Steps}}},
               undefined,
               #{impl := Impl} = State) ->
-  LogicalExprID = ID - 1,
+  LogicalExprID = <<ID/binary, "_le">>,
 
   {LogicalExprResult, NewState1} =
     case get_execution_result(LogicalExprID, State) of
@@ -141,14 +147,14 @@ parallel(ParallelInteractions, #{impl := Impl} = State) ->
   ExecFun =
     fun({ID, _} = Entry, PState) ->
       Result = get_execution_result(ID, PState),
-      {ID, wms_test:test(fun()->execute_entry(Entry, Result, PState)end)}
+      {ID, execute_entry(Entry, Result, PState)}
     end,
   ExecutionResults = wms_common:fork(ExecFun, [State],
                                      ParallelInteractions, infinity),
 
   {MergedState, Errors} =
     lists:foldl(
-      fun({ID, {ok, Result, _}}, {CurrState, Errors}) ->
+      fun({ok, {ID, {ok, Result, _}}}, {CurrState, Errors}) ->
         NewState = store_execution_result(ID, Result, CurrState),
         ok = Impl:save_state(NewState),
         {merge_state(CurrState, NewState), Errors};
@@ -161,7 +167,7 @@ parallel(ParallelInteractions, #{impl := Impl} = State) ->
     [] ->
       {ok, true, MergedState};
     _ ->
-      throw({parallel_errors, Errors})
+      throw({parallel_errors, lists:usort(Errors), MergedState})
   end.
 
 -spec merge_state(engine_state(), engine_state()) ->
@@ -178,8 +184,9 @@ create_parameter_values(State, ParameterSpec) ->
       {ParID, Value}
     end, ParameterSpec).
 
--spec process_return_values([return_value_spec()], return_values(), engine_state()) ->
-  {ok, engine_state()}.
+-spec process_return_values([return_value_spec()],
+                            return_values(), engine_state()) ->
+                             {ok, engine_state()}.
 process_return_values(ReturnValueSpec, ReturnValues, #{impl := Impl} = State) ->
   {ok, lists:foldl(
     fun({RetValParName, Destination}, PState) ->
@@ -197,12 +204,15 @@ process_return_values(ReturnValueSpec, ReturnValues, #{impl := Impl} = State) ->
 %% -----------------------------------------------------------------------------
 %% Execute command
 %% -----------------------------------------------------------------------------
+
 -spec execute_cmd(command(), engine_state()) ->
   {ok, engine_state()}.
 execute_cmd({cmd, {error, VariableOrLiteral}}, State) ->
-  throw({exit, error, eval_var(VariableOrLiteral, State), State});
+  {Message, _} = eval_var(VariableOrLiteral, State),
+  throw({exit, error, Message, State});
 execute_cmd({cmd, {exit, VariableOrLiteral}}, State) ->
-  throw({exit, ok, eval_var(VariableOrLiteral, State), State});
+  {Message, _} = eval_var(VariableOrLiteral, State),
+  throw({exit, ok, Message, State});
 execute_cmd({cmd, {wait, WaitType, EventIDS}}, #{impl := Impl} = State) ->
   Impl:wait_events(State, WaitType, EventIDS);
 execute_cmd({cmd, {fire, EventID}}, #{impl := Impl} = State) ->
@@ -221,24 +231,26 @@ eval_le([], State) ->
   % no logical expression, always true
   {true, State};
 eval_le(LogicalExpression, State) ->
-  eval_le(LogicalExpression, true, State).
+  eval_le(LogicalExpression, undefined, State).
 
--spec eval_le(logical_expr(), boolean(), engine_state()) ->
+-spec eval_le(logical_expr(), tree_state(), engine_state()) ->
   {boolean(), engine_state()}.
 eval_le([], true, State) ->
   {true, State};
 eval_le(_, false, State) ->
   {false, State};
-eval_le([{BooleanOp, ComparatorExpression} | Rest], true, State) ->
+eval_le([{BooleanOp, ComparatorExpression} | Rest], PrevBooleanValue, State) ->
   {ResultComparsion, NewState1} = eval_ce(ComparatorExpression, State),
-  {ResultBooleanOp, NewState2} = eval_bo(BooleanOp, ResultComparsion, true, NewState1),
+  {ResultBooleanOp, NewState2} = eval_bo(BooleanOp,
+                                         ResultComparsion,
+                                         PrevBooleanValue, NewState1),
   eval_le(Rest, ResultBooleanOp, NewState2).
 
 %% -----------------------------------------------------------------------------
 %% Eval boolean expression
 %% -----------------------------------------------------------------------------
 
--spec eval_bo(bool_op(), boolean(), boolean(), engine_state()) ->
+-spec eval_bo(bool_op(), tree_state(), tree_state(), engine_state()) ->
   {boolean(), engine_state()}.
 eval_bo('and', Logical1, Logical2, State) ->
   {Logical1 and Logical2, State};
@@ -246,6 +258,8 @@ eval_bo('or', Logical1, Logical2, State) ->
   {Logical1 or Logical2, State};
 eval_bo('xor', Logical1, Logical2, State) ->
   {Logical1 xor Logical2, State};
+eval_bo('set', Logical1, undefined, State) ->
+  {Logical1, State};
 eval_bo(Invalid, _, _, State) ->
   throw({invalid, bool_op, Invalid, State}).
 
@@ -276,6 +290,8 @@ eval_co('<', Val1, Val2, State) ->
   {Val1 < Val2, State};
 eval_co('<=', Val1, Val2, State) ->
   {Val1 =< Val2, State};
+eval_co('!=', Val1, Val2, State) ->
+  {Val1 =/= Val2, State};
 eval_co(Invalid, _, _, State) ->
   throw({invalid, eval_co, Invalid, State}).
 
@@ -285,7 +301,9 @@ eval_co(Invalid, _, _, State) ->
 
 -spec eval_var(variable_or_literal(), engine_state()) ->
   {term(), engine_state()}.
-eval_var({_, _} = Reference, #{impl:=Impl} = State) ->
+eval_var({private, _} = Reference, #{impl:=Impl} = State) ->
+  Impl:evaluate_variable(State, Reference);
+eval_var({global, _} = Reference, #{impl:=Impl} = State) ->
   Impl:evaluate_variable(State, Reference);
 eval_var(Literal, State) ->
   {Literal, State}.

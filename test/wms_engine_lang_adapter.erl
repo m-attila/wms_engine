@@ -78,7 +78,7 @@ execute_interaction(State, InteractionID, ParameterValues) ->
     [] ->
       throw({no_interaction_reply, InteractionID});
     [{InteractionID, ReturnValues}] ->
-      {ok, ReturnValues, State}
+      {ok, check_interaction_ret(ReturnValues), State}
   end.
 
 -spec wait_events(State :: engine_state(),
@@ -99,3 +99,8 @@ fire_event(State, EventID) ->
 add_execution(Term) ->
   [{execution, History}] = ets:lookup(?MODULE, execution),
   ets:update_element(?MODULE, execution, {2, [Term | History]}).
+
+check_interaction_ret(#{} = Map) ->
+  Map;
+check_interaction_ret(Error) ->
+  throw(Error).

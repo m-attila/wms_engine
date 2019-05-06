@@ -20,9 +20,9 @@
 %%====================================================================
 
 -spec start_link() ->
-    any().
+  any().
 start_link() ->
-    supervisor:start_link({local, ?SERVER}, ?MODULE, []).
+  supervisor:start_link({local, ?SERVER}, ?MODULE, []).
 
 %%====================================================================
 %% Supervisor callbacks
@@ -33,10 +33,11 @@ start_link() ->
 %% Before OTP 18 tuples must be used to specify a child. e.g.
 %% Child :: {Id,StartFunc,Restart,Shutdown,Type,Modules}
 -spec init(Args :: term()) ->
-    {ok, {SupFlags :: supervisor:sup_flags(), [ChildSpec :: supervisor:child_spec()]}}
-    | ignore.
+  {ok, {SupFlags :: supervisor:sup_flags(),
+        [ChildSpec :: supervisor:child_spec()]}}
+  | ignore.
 init([]) ->
-    {ok, {{one_for_all, 0, 1}, []}}.
+  {ok, {{one_for_all, 0, 1}, []}}.
 
 %%====================================================================
 %% Internal functions

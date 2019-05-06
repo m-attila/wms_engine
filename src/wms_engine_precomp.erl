@@ -10,37 +10,142 @@
 -author("Attila Makra").
 
 -include("wms_engine_lang.hrl").
-
 %% API
--export([compile/1]).
+-export([compile/1, get_ids/1]).
 
+%% =============================================================================
+%% Types
+%% =============================================================================
+
+-type counters() :: rule | call | parallel | cmd.
+
+-type level_state() :: #{
+level_id := binary(),
+rule := integer(),
+call := integer(),
+parallel := integer(),
+cmd := integer()
+}.
+
+-type state() :: #{
+current_level := level_state(),
+stack := [level_state()]
+}.
+
+%% =============================================================================
+%% Functions
+%% =============================================================================
 
 -spec compile([rule()]) ->
   {ok, [compiled_rule()]}.
 compile(Rules) ->
-  {_, Compiled} = compile(Rules, [], 1),
+  State =
+    #{
+      current_level => new_level(),
+      stack => []
+    },
+
+  {_, Compiled} = compile(Rules, [], State),
   {ok, lists:reverse(Compiled)}.
 
 -spec compile(entry() | [entry()],
-              [compiled_entry()], integer()) ->
-               {integer(), [compiled_entry()]}.
-compile([], AccList, NewID) ->
-  {NewID, AccList};
-compile([Element | Rest], AccList, NewID) ->
-  {NewID1, NewAccList} = compile(Element, AccList, NewID),
-  compile(Rest, NewAccList, NewID1);
-compile({rule, {LogicalExpression, Steps}}, AccList, NewID) ->
-  {NewID1, CompiledSteps} = compile(Steps, [], NewID),
-  CompiledRule = {NewID1 + 1,
+              [compiled_entry()], state()) ->
+               {state(), [compiled_entry()]}.
+compile([], AccList, State) ->
+  {State, AccList};
+
+compile([Element | Rest], AccList, State) ->
+  {NewState, NewAccList} = compile(Element, AccList, State),
+  compile(Rest, NewAccList, NewState);
+
+compile({rule, {LogicalExpression, Steps}}, AccList, State) ->
+  {NewID, NewState} = new(rule, State),
+  NewState1 = enter(NewID, NewState),
+
+  {NewState2, CompiledSteps} = compile(Steps, [], NewState1),
+  NewState3 = leave(NewState2),
+
+  CompiledRule = {NewID,
                   {rule,
                    {LogicalExpression, lists:reverse(CompiledSteps)}}},
-  {NewID1 + 2, [CompiledRule | AccList]};
-compile({call, _} = Interaction, AccList, NewID) ->
-  {NewID + 1, [{NewID, Interaction} | AccList]};
-compile({parallel, ParallelInteractions}, AccList, NewID) ->
-  {NewID1, CompiledInteractions} = compile(ParallelInteractions, [], NewID),
-  CompiledParallel = {NewID1, {parallel,
-                               lists:reverse(CompiledInteractions)}},
-  {NewID1 + 1, [CompiledParallel | AccList]};
-compile({cmd, _} = Command, AccList, NewID) ->
-  {NewID + 1, [{NewID, Command} | AccList]}.
+  {NewState3, [CompiledRule | AccList]};
+
+compile({call, _} = Interaction, AccList, State) ->
+  {NewID, NewState} = new(call, State),
+  {NewState, [{NewID, Interaction} | AccList]};
+
+compile({parallel, ParallelInteractions}, AccList, State) ->
+  {NewID, NewState} = new(parallel, State),
+  NewState1 = enter(NewID, NewState),
+
+  {NewState2, CompiledInteractions} = compile(ParallelInteractions, [], NewState1),
+  NewState3 = leave(NewState2),
+  CompiledParallel = {NewID, {parallel,
+                              lists:reverse(CompiledInteractions)}},
+  {NewState3, [CompiledParallel | AccList]};
+compile({cmd, _} = Command, AccList, State) ->
+  {NewID, NewState} = new(cmd, State),
+  {NewState, [{NewID, Command} | AccList]}.
+
+-spec get_ids([compiled_entry()]) ->
+  [binary()].
+get_ids(Compiled) ->
+  get_ids(Compiled, []).
+
+get_ids([], Accu) ->
+  Accu;
+get_ids([{ID, {rule, {_, Step}}} | Rest], Accu) ->
+  get_ids(Rest, [ID, <<ID/binary, "_le">> | Accu] ++ get_ids(Step, []));
+get_ids([{ID, {parallel, Interactions}} | Rest], Accu) ->
+  get_ids(Rest, [ID | Accu] ++ get_ids(Interactions, []));
+get_ids([{ID, _} | Rest], Accu) ->
+  get_ids(Rest, [ID | Accu]).
+
+-spec new(counters(), state()) ->
+  {binary(), state()}.
+new(Counter, #{current_level := Current} = State) ->
+  LevelID = maps:get(level_id, Current),
+  % new counter number for level
+  N = maps:get(Counter, Current) + 1,
+
+  NewID = <<(atom_to_binary(Counter, latin1))/binary, "@",
+            (integer_to_binary(N))/binary>>,
+
+  {case LevelID of
+     <<>> ->
+       NewID;
+     _ ->
+       <<LevelID/binary, "_", NewID/binary>>
+   end,
+   State#{current_level := Current#{Counter := N}}}.
+
+
+-spec enter(binary(), state()) ->
+  state().
+enter(ID, #{current_level := Current, stack := Stack} = State) ->
+  State#{
+    current_level := new_level(ID),
+    stack := [Current | Stack]
+  }.
+
+leave(#{stack := [Top | Rest]} = State) ->
+  State#{
+    current_level := Top,
+    stack := Rest
+  }.
+
+-spec new_level() ->
+  level_state().
+new_level() ->
+  new_level(<<>>).
+
+-spec new_level(binary()) ->
+  level_state().
+new_level(ID) ->
+  #{
+    level_id => ID,
+    rule => 0,
+    call => 0,
+    parallel => 0,
+    cmd => 0
+  }.
