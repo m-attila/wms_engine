@@ -57,6 +57,28 @@
 %% Execute list of entries
 %% -----------------------------------------------------------------------------
 
+%% @doc
+%%
+%%-------------------------------------------------------------------
+%%
+%% ### Function
+%% execute/2
+%% ###### Purpose
+%% Execute compiled workflow language
+%% ###### Arguments
+%%
+%% ###### Returns
+%% ###### Exceptions
+%% throw : {parallel_errors, [error_tuplues], State}
+%% throw : {exit, error, Message, State}
+%% throw : {exit, ok, Message, State}
+%% throw : {invalid, eval_co, Operation, State}
+%% throw : {invalid, bool_op, Operation, State}
+%% throw : {not_found, retval, RetValParName, State}
+%%-------------------------------------------------------------------
+%%
+%% @end
+
 -spec execute(compiled_entry() | [compiled_entry()], engine_state()) ->
   {ok, engine_state()}.
 execute([], State) ->
@@ -217,9 +239,8 @@ execute_cmd({cmd, {wait, WaitType, EventIDS}}, #{impl := Impl} = State) ->
   Impl:wait_events(State, WaitType, EventIDS);
 execute_cmd({cmd, {fire, EventID}}, #{impl := Impl} = State) ->
   Impl:fire_event(State, EventID);
-execute_cmd({cmd, {move, _Source, _Destination}}, _State) ->
-%%  move_variable(Source, Destination, State).
-  throw(not_implemented).
+execute_cmd({cmd, {move, Source, Destination}}, State) ->
+  move_variable(Source, Destination, State).
 
 %% -----------------------------------------------------------------------------
 %% Eval logical expression
@@ -309,47 +330,122 @@ eval_var(Literal, State) ->
   {Literal, State}.
 
 %% -----------------------------------------------------------------------------
+%% Eval operation
+%% -----------------------------------------------------------------------------
+-define(TWO_ARG_OPS, #{
+  '+' => fun plus_operator/3,
+  '-' => fun minus_operator/3,
+  '*' => fun multiple_operator/3,
+  '/' => fun divisor_operator/3
+}).
+
+eval_operation(Literal, nop, State) ->
+  {Literal, State};
+eval_operation(Literal, {Operation, OpArg} = Op, State) ->
+  {OpArgVal, NewState1} = eval_var(OpArg, State),
+  case maps:get(Operation, ?TWO_ARG_OPS, undefined) of
+    undefined ->
+      throw({invalid, eval_operation, Op, State});
+    Fun ->
+      Fun(Literal, OpArgVal, NewState1)
+  end;
+eval_operation(_, Op, State) ->
+  throw({invalid, eval_operation, Op, State}).
+
+-spec plus_operator([term()] | number() | boolean(),
+                    [term()] | number() | boolean(), engine_state()) ->
+                     {[term()] | number()| boolean(), engine_state()}.
+plus_operator(Literal, OpArgVal, State) when is_list(Literal)
+                                             andalso is_list(OpArgVal) ->
+  {Literal ++ OpArgVal, State};
+plus_operator(Literal, OpArgVal, State) when is_number(Literal)
+                                             andalso is_number(OpArgVal) ->
+  {Literal + OpArgVal, State}.
+plus_operator(Literal, OpArgVal, State) when is_boolean(Literal)
+                                             andalso is_boolean(OpArgVal) ->
+  {Literal or OpArgVal, State};
+plus_operator(Literal, OpArgVal, State) ->
+  throw({invalid, '+', {Literal, OpArgVal}, State}).
+
+-spec minus_operator(number() | boolean() | [term()],
+                     number() | boolean() | [term()], engine_state()) ->
+                      {number()| boolean() | [term()], engine_state()}.
+minus_operator(Literal, OpArgVal, State) when is_number(Literal)
+                                              andalso is_number(OpArgVal) ->
+  {Literal - OpArgVal, State}.
+minus_operator(Literal, OpArgVal, State) when is_boolean(Literal)
+                                              andalso is_boolean(OpArgVal) ->
+  {Literal xor OpArgVal, State};
+minus_operator(Literal, OpArgVal, State) when is_list(Literal)
+                                              andalso is_list(OpArgVal) ->
+  {lists:subtract(Literal, OpArgVal), State};
+minus_operator(Literal, OpArgVal, State) ->
+  throw({invalid, '-', {Literal, OpArgVal}, State}).
+
+-spec multiple_operator(number() | boolean() | [term()],
+                        number() | boolean() | [term()], engine_state()) ->
+                         {number()| boolean()| [term()], engine_state()}.
+multiple_operator(Literal, OpArgVal, State) when is_number(Literal)
+                                                 andalso is_number(OpArgVal) ->
+  {Literal * OpArgVal, State}.
+multiple_operator(Literal, OpArgVal, State) when is_boolean(Literal)
+                                                 andalso is_boolean(OpArgVal) ->
+  {Literal and OpArgVal, State};
+multiple_operator(Literal, OpArgVal, State) when is_list(Literal)
+                                                 andalso is_list(OpArgVal) ->
+  {lists:usort(
+    lists:filter(
+      fun(E) ->
+        lists:member(E, OpArgVal) end, Literal) ++
+      lists:filter(
+        fun(E) ->
+          lists:member(E, Literal) end, OpArgVal)),
+   State};
+multiple_operator(Literal, OpArgVal, State) ->
+  throw({invalid, '*', {Literal, OpArgVal}, State}).
+
+-spec divisor_operator(integer() | float(),
+                       integer() | float(), engine_state()) ->
+                        {integer() | float(), engine_state()}.
+divisor_operator(Literal, OpArgVal, State) when is_integer(Literal)
+                                                andalso is_integer(OpArgVal) ->
+  {Literal div OpArgVal, State}.
+divisor_operator(Literal, OpArgVal, State) when is_number(Literal)
+                                                andalso is_number(OpArgVal) ->
+  {Literal / OpArgVal, State};
+divisor_operator(Literal, OpArgVal, State) ->
+  throw({invalid, '/', {Literal, OpArgVal}, State}).
+
+
+%% -----------------------------------------------------------------------------
 %% Move variable
 %% -----------------------------------------------------------------------------
 
-%%move_variable({{global, _} = Source, Operation}, {global, _} = Destination, State) ->
-%%  remote_move_variable(Source, Operation, Destination, State);
-%%move_variable({Source, Operation}, Destination, State) ->
-%%  local_move_variable(Source, Operation, Destination, State);
-%%
-%%move_variable({global, _} = Source, {global, _} = Destination, State) ->
-%%  remote_move_variable(Source, Destination, State);
-%%move_variable(Source, Destination, State) ->
-%%  local_move_variable(Source, Destination, State);
-%%move_variable(Source, Destination, State) ->
-%%  throw({invalid, move_variable, {Source, Destination}, State}).
-%%
-%%
-%%-spec local_move_variable(source(), operation(), destination(), engine_state()) ->
-%%  {ok, engine_state()}.
-%%local_move_variable(Source, Operation, Destination, State) ->
-%%  {SourceVal, NewState1} = eval_var(Source, State),
-%%  {OpVal, NewState2} = eval_operation(SourceVal, Operation, NewState1),
-%%  set_var(Destination, OpVal, NewState2).
-%%
-%%-spec local_move_variable(source(), destination(), engine_state()) ->
-%%  {ok, engine_state()}.
-%%local_move_variable(Source, Destination, State) ->
-%%  {SourceVal, NewState1} = eval_var(Source, State),
-%%  set_var(Destination, SourceVal, NewState1).
-%%
-%%-spec remote_move_variable(variable_reference(), operation(), variable_reference(), engine_state()) ->
-%%  {ok, engine_state()}.
-%%remote_move_variable(_Source, _Operation, _Destination, _State) ->
-%%  erlang:error(not_implemented).
-%%
-%%-spec remote_move_variable(variable_reference(), variable_reference(), engine_state()) ->
-%%  {ok, engine_state()}.
-%%remote_move_variable(_Source, _Destination, _State) ->
-%%  erlang:error(not_implemented).
-%%
-%%-spec eval_operation(literal(), operation(), engine_state()) ->
-%%  {literal(), engine_state()}.
-%%eval_operation(_SourceVal, _Operation, _State) ->
-%%  erlang:error(not_implemented).
-%%
+-spec move_variable(source() | {source(), operation()}, destination(), engine_state()) ->
+  {ok, engine_state()}.
+
+move_variable(Source, Destination, State) ->
+  move_variable(Source, Destination, State, is_remote(Source, Destination)).
+
+-spec move_variable(source() | {source(), operation()}, destination(), engine_state(), boolean()) ->
+  {ok, engine_state()}.
+move_variable({{_, _} = Source, Op}, Destination, #{impl := Impl} = State, false) ->
+  {SourceVal, NewState1} = eval_var(Source, State),
+  {SourceVal1, NewState2} = eval_operation(SourceVal, Op, NewState1),
+  {ok, _NewState3} = Impl:set_variable(NewState2, Destination, SourceVal1);
+move_variable(Source, Destination, State, false) ->
+  move_variable({{Source, nop}, Destination}, State, false);
+move_variable(_, _, _, true) ->
+  throw(not_implemented).
+
+-spec is_remote(source() | {source(), operation()}, destination()) ->
+  boolean().
+is_remote({global, _ID1}, {global, _ID2}) ->
+  true;
+is_remote({{_, _ID1}, {_Op, {global, _OpArg}}}, {global, _}) ->
+  true;
+is_remote({{global, _ID1}, {_Op, {_, _OpArg}}}, {global, _}) ->
+  true;
+is_remote(_, _) ->
+  false.
+

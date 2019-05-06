@@ -41,6 +41,8 @@ executed := #{integer() := execution_result()}
 %% -----------------------------------------------------------------------------
 %% Operations
 %% -----------------------------------------------------------------------------
+
+-type no_op() :: nop.
 % number operations
 -type number_base_op() :: {'+' | '-' | '*' | '/', variable_or_literal()}.
 
@@ -76,7 +78,7 @@ logical_not().
 list_inters() | list_sub().
 
 -type operation() :: number_base_op() | string_concat() | logical_operations() |
-date_operations() | time_operations() | list_operations().
+date_operations() | time_operations() | list_operations() | no_op().
 
 %% -----------------------------------------------------------------------------
 %% Commands
