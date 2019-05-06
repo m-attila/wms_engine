@@ -360,7 +360,7 @@ plus_operator(Literal, OpArgVal, State) when is_list(Literal)
   {Literal ++ OpArgVal, State};
 plus_operator(Literal, OpArgVal, State) when is_number(Literal)
                                              andalso is_number(OpArgVal) ->
-  {Literal + OpArgVal, State}.
+  {Literal + OpArgVal, State};
 plus_operator(Literal, OpArgVal, State) when is_boolean(Literal)
                                              andalso is_boolean(OpArgVal) ->
   {Literal or OpArgVal, State};
@@ -372,7 +372,7 @@ plus_operator(Literal, OpArgVal, State) ->
                       {number()| boolean() | [term()], engine_state()}.
 minus_operator(Literal, OpArgVal, State) when is_number(Literal)
                                               andalso is_number(OpArgVal) ->
-  {Literal - OpArgVal, State}.
+  {Literal - OpArgVal, State};
 minus_operator(Literal, OpArgVal, State) when is_boolean(Literal)
                                               andalso is_boolean(OpArgVal) ->
   {Literal xor OpArgVal, State};
@@ -387,7 +387,7 @@ minus_operator(Literal, OpArgVal, State) ->
                          {number()| boolean()| [term()], engine_state()}.
 multiple_operator(Literal, OpArgVal, State) when is_number(Literal)
                                                  andalso is_number(OpArgVal) ->
-  {Literal * OpArgVal, State}.
+  {Literal * OpArgVal, State};
 multiple_operator(Literal, OpArgVal, State) when is_boolean(Literal)
                                                  andalso is_boolean(OpArgVal) ->
   {Literal and OpArgVal, State};
@@ -409,7 +409,7 @@ multiple_operator(Literal, OpArgVal, State) ->
                         {integer() | float(), engine_state()}.
 divisor_operator(Literal, OpArgVal, State) when is_integer(Literal)
                                                 andalso is_integer(OpArgVal) ->
-  {Literal div OpArgVal, State}.
+  {Literal div OpArgVal, State};
 divisor_operator(Literal, OpArgVal, State) when is_number(Literal)
                                                 andalso is_number(OpArgVal) ->
   {Literal / OpArgVal, State};
