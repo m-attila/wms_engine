@@ -10,6 +10,14 @@
 -author("Attila Makra").
 
 -include_lib("eunit/include/eunit.hrl").
+-define(CHK_VAR(State, ExpectedValue, VariableRef),
+  begin
+    (fun() ->
+      #{impl:=Impl} = State,
+      ?assertMatch({ExpectedValue, _}, Impl:evaluate_variable(State, VariableRef))
+     end)()
+  end).
+
 
 %% =============================================================================
 %% Test functions
@@ -118,18 +126,10 @@ execute_test() ->
       ?assertEqual(ExpectedHistory, [Seq | lists:sort(Parallels)]),
 
       % check interaction return value
-      ?assertMatch(
-        {Ret01Result, _},
-        wms_engine_lang_adapter:evaluate_variable(#{}, Ret01DestinationVariable)),
-      ?assertMatch(
-        {Ret21Result, _},
-        wms_engine_lang_adapter:evaluate_variable(#{}, Ret21DestinationVariable)),
-      ?assertMatch(
-        {Ret22Result, _},
-        wms_engine_lang_adapter:evaluate_variable(#{}, Ret22DestinationVariable)),
-      ?assertMatch(
-        {Ret30Result, _},
-        wms_engine_lang_adapter:evaluate_variable(#{}, Ret30DestinationVariable))
+      ?CHK_VAR(NewState, Ret01Result, Ret01DestinationVariable),
+      ?CHK_VAR(NewState, Ret21Result, Ret21DestinationVariable),
+      ?CHK_VAR(NewState, Ret22Result, Ret22DestinationVariable),
+      ?CHK_VAR(NewState, Ret30Result, Ret30DestinationVariable)
     end,
   execute(Test,
           [{Var1, Var1Value}, {Var2, Var2Value}],
@@ -204,9 +204,7 @@ execute_test() ->
       ?assertEqual(ExpectedHistory, [Seq | lists:sort(Parallels)]),
 
       % check interaction return value
-      ?assertMatch(
-        {Ret21Result, _},
-        wms_engine_lang_adapter:evaluate_variable(#{}, Ret21DestinationVariable)),
+      ?CHK_VAR(NewState, Ret21Result, Ret21DestinationVariable),
       NewState
     end,
   LastState =
@@ -254,9 +252,7 @@ execute_test() ->
       ?assertEqual(ExpectedHistory, [Seq | lists:sort(Parallels)]),
 
       % check interaction return value
-      ?assertMatch(
-        {Ret22Result, _},
-        wms_engine_lang_adapter:evaluate_variable(#{}, Ret22DestinationVariable))
+      ?CHK_VAR(NewState, Ret22Result, Ret22DestinationVariable)
     end,
   execute(Test2,
           [{Var1, Var1Value}, {Var2, Var2Value}],
@@ -312,9 +308,7 @@ execute_test() ->
       ?assertEqual(ExpectedHistory, [Seq | lists:sort(Parallels)]),
 
       % check interaction return value
-      ?assertMatch(
-        {Ret21Result, _},
-        wms_engine_lang_adapter:evaluate_variable(#{}, Ret21DestinationVariable)),
+      ?CHK_VAR(NewState, Ret21Result, Ret21DestinationVariable),
       NewState
     end,
   LastState =
@@ -433,6 +427,116 @@ execute_cmd_test() ->
 
     end,
   execute(Test3, [], []).
+
+execute_move_test() ->
+  SourcePVar1 = {private, <<"SP1">>},
+
+  SourcePVar2 = {private, <<"SP2">>},
+  SourcePVar3 = {private, <<"SP3">>},
+  SourcePVar4 = {private, <<"SG1">>},
+  SourceGVal = 2,
+  DestinationPVar1 = {private, <<"DP1">>},
+  DestinationPVar2 = {private, <<"DP2">>},
+  DestinationPVar3 = {private, <<"DP3">>},
+  DestinationPVar4 = {private, <<"DP4">>},
+  DestinationPVar5 = {private, <<"DP5">>},
+  DestinationPVar6 = {private, <<"DP6">>},
+  DestinationPVar7 = {private, <<"DP7">>},
+  DestinationGVar = {global, <<"DP1">>},
+
+  % local move test
+  Rules = [
+            {rule, {
+              [],
+              [
+                {cmd, {move, SourcePVar1, DestinationPVar1}},
+                {cmd, {move, SourcePVar1, DestinationGVar}},
+                {cmd, {move, SourcePVar4, DestinationPVar2}},
+                {cmd, {move, 256, DestinationPVar3}},
+                % move with operation (local)
+                {cmd, {move, {SourcePVar1, {'+', SourcePVar2}}, DestinationPVar4}},
+                {cmd, {move, {SourcePVar3, {{'--', head}}}, DestinationPVar5}},
+                {cmd, {move, {SourcePVar3, {{'?', head}}}, DestinationPVar6}},
+                {cmd, {move, {true, '!'}, DestinationPVar7}},
+                % invalid operation with two args
+                {cmd, {move, {SourcePVar1, {'+', "a"}}, DestinationPVar4}}
+              ]
+            }}
+          ],
+  Test =
+    fun() ->
+
+      {ok, Compiled} = wms_engine_precomp:compile(Rules),
+      AllID = wms_engine_precomp:get_ids(Compiled),
+      State = #{impl => wms_engine_lang_adapter, executed => #{}},
+      NewState =
+        try
+          wms_engine_lang:execute(Compiled, State),
+          ?assert(false)
+        catch throw: {invalid, eval_operation,
+                      {'+', {1, "a"}}, St} ->
+          St
+        end,
+      assert_exec_result(
+        NewState, AllID,
+        [<<"rule@1_le">>,
+         <<"rule@1_cmd@1">>, <<"rule@1_cmd@2">>, <<"rule@1_cmd@3">>,
+         <<"rule@1_cmd@4">>, <<"rule@1_cmd@5">>, <<"rule@1_cmd@6">>,
+         <<"rule@1_cmd@7">>, <<"rule@1_cmd@8">>
+        ], true),
+      assert_exec_result(
+        NewState, AllID,
+        [<<"rule@1">>, <<"rule@1_cmd@9">>], undefined),
+
+      ?CHK_VAR(NewState, SourcePVal1, DestinationPVar1),
+      ?CHK_VAR(NewState, SourcePVal1, DestinationGVar),
+      ?CHK_VAR(NewState, SourceGVal, DestinationPVar2),
+      ?CHK_VAR(NewState, 256, DestinationPVar3),
+      ?CHK_VAR(NewState, 1 + 2, DestinationPVar4),
+      ?CHK_VAR(NewState, first, DestinationPVar5),
+      ?CHK_VAR(NewState, [second], SourcePVar3),
+      ?CHK_VAR(NewState, second, DestinationPVar6),
+      ?CHK_VAR(NewState, false, DestinationPVar7)
+    end,
+  execute(Test,
+          [{SourcePVar1, 1},
+           {SourcePVar2, 2},
+           {SourcePVar3, [first, second]},
+           {SourcePVar4, SourceGVal}],
+          []),
+
+  % invalid operator with one args
+  Rules1 = [
+            {rule, {
+              [],
+              [
+                % invalid operation with one args
+                {cmd, {move, {SourcePVar1, '!'}, DestinationPVar4}}
+              ]
+            }}
+          ],
+  Test1 =
+    fun() ->
+
+      {ok, Compiled} = wms_engine_precomp:compile(Rules1),
+      AllID = wms_engine_precomp:get_ids(Compiled),
+      State = #{impl => wms_engine_lang_adapter, executed => #{}},
+      NewState =
+        try
+          wms_engine_lang:execute(Compiled, State),
+          ?assert(false)
+        catch throw: {invalid, eval_operation,
+                      {'!', 1}, St} ->
+          St
+        end,
+      assert_exec_result(
+        NewState, AllID,
+        [<<"rule@1_le">>], true),
+      assert_exec_result(
+        NewState, AllID,
+        [<<"rule@1">>, <<"rule@1_cmd@1">>], undefined)
+    end,
+  execute(Test1, [{SourcePVar1, 1}], []).
 
 eval_comp_test() ->
   % string

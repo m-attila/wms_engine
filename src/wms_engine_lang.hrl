@@ -59,7 +59,7 @@ logical_not().
 
 % date operations
 -type date_mod() :: {{'+' | '-', day | month | year}, variable_or_literal()}.
--type date_set() :: {{set, day | month | year}, variable_or_literal()}.
+-type date_set() :: {{set, day | month | year}, variable_or_literal() | 'end'}.
 -type date_operations() :: date_mod() | date_set().
 
 % time operations

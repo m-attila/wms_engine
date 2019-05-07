@@ -332,90 +332,34 @@ eval_var(Literal, State) ->
 %% -----------------------------------------------------------------------------
 %% Eval operation
 %% -----------------------------------------------------------------------------
--define(TWO_ARG_OPS, #{
-  '+' => fun plus_operator/3,
-  '-' => fun minus_operator/3,
-  '*' => fun multiple_operator/3,
-  '/' => fun divisor_operator/3
-}).
 
-eval_operation(Literal, nop, State) ->
-  {Literal, State};
-eval_operation(Literal, {Operation, OpArg} = Op, State) ->
+-spec eval_operation(literal(), operation(), engine_state()) ->
+  {literal() | {literal(), [literal()]}, engine_state()}.
+eval_operation(Literal, {Operation, OpArg}, State) ->
   {OpArgVal, NewState1} = eval_var(OpArg, State),
-  case maps:get(Operation, ?TWO_ARG_OPS, undefined) of
-    undefined ->
-      throw({invalid, eval_operation, Op, State});
-    Fun ->
-      Fun(Literal, OpArgVal, NewState1)
-  end;
-eval_operation(_, Op, State) ->
-  throw({invalid, eval_operation, Op, State}).
-
--spec plus_operator([term()] | number() | boolean(),
-                    [term()] | number() | boolean(), engine_state()) ->
-                     {[term()] | number()| boolean(), engine_state()}.
-plus_operator(Literal, OpArgVal, State) when is_list(Literal)
-                                             andalso is_list(OpArgVal) ->
-  {Literal ++ OpArgVal, State};
-plus_operator(Literal, OpArgVal, State) when is_number(Literal)
-                                             andalso is_number(OpArgVal) ->
-  {Literal + OpArgVal, State};
-plus_operator(Literal, OpArgVal, State) when is_boolean(Literal)
-                                             andalso is_boolean(OpArgVal) ->
-  {Literal or OpArgVal, State};
-plus_operator(Literal, OpArgVal, State) ->
-  throw({invalid, '+', {Literal, OpArgVal}, State}).
-
--spec minus_operator(number() | boolean() | [term()],
-                     number() | boolean() | [term()], engine_state()) ->
-                      {number()| boolean() | [term()], engine_state()}.
-minus_operator(Literal, OpArgVal, State) when is_number(Literal)
-                                              andalso is_number(OpArgVal) ->
-  {Literal - OpArgVal, State};
-minus_operator(Literal, OpArgVal, State) when is_boolean(Literal)
-                                              andalso is_boolean(OpArgVal) ->
-  {Literal xor OpArgVal, State};
-minus_operator(Literal, OpArgVal, State) when is_list(Literal)
-                                              andalso is_list(OpArgVal) ->
-  {lists:subtract(Literal, OpArgVal), State};
-minus_operator(Literal, OpArgVal, State) ->
-  throw({invalid, '-', {Literal, OpArgVal}, State}).
-
--spec multiple_operator(number() | boolean() | [term()],
-                        number() | boolean() | [term()], engine_state()) ->
-                         {number()| boolean()| [term()], engine_state()}.
-multiple_operator(Literal, OpArgVal, State) when is_number(Literal)
-                                                 andalso is_number(OpArgVal) ->
-  {Literal * OpArgVal, State};
-multiple_operator(Literal, OpArgVal, State) when is_boolean(Literal)
-                                                 andalso is_boolean(OpArgVal) ->
-  {Literal and OpArgVal, State};
-multiple_operator(Literal, OpArgVal, State) when is_list(Literal)
-                                                 andalso is_list(OpArgVal) ->
-  {lists:usort(
-    lists:filter(
-      fun(E) ->
-        lists:member(E, OpArgVal) end, Literal) ++
-      lists:filter(
-        fun(E) ->
-          lists:member(E, Literal) end, OpArgVal)),
-   State};
-multiple_operator(Literal, OpArgVal, State) ->
-  throw({invalid, '*', {Literal, OpArgVal}, State}).
-
--spec divisor_operator(integer() | float(),
-                       integer() | float(), engine_state()) ->
-                        {integer() | float(), engine_state()}.
-divisor_operator(Literal, OpArgVal, State) when is_integer(Literal)
-                                                andalso is_integer(OpArgVal) ->
-  {Literal div OpArgVal, State};
-divisor_operator(Literal, OpArgVal, State) when is_number(Literal)
-                                                andalso is_number(OpArgVal) ->
-  {Literal / OpArgVal, State};
-divisor_operator(Literal, OpArgVal, State) ->
-  throw({invalid, '/', {Literal, OpArgVal}, State}).
-
+  Result =
+    case wms_common:eval_operation(Literal, Operation, OpArgVal) of
+      {error, Reason} ->
+        throw({invalid, eval_operation, Reason, NewState1});
+      Value ->
+        Value
+    end,
+  {Result, NewState1};
+eval_operation(Literal, Operation, State) ->
+  Op = case Operation of
+         {Complex} ->
+           Complex;
+         _ ->
+           Operation
+       end,
+  Result =
+    case wms_common:eval_operation(Literal, Op) of
+      {error, Reason} ->
+        throw({invalid, eval_operation, Reason, State});
+      Value ->
+        Value
+    end,
+  {Result, State}.
 
 %% -----------------------------------------------------------------------------
 %% Move variable
@@ -430,17 +374,38 @@ move_variable(Source, Destination, State) ->
 -spec move_variable(source() | {source(), operation()}, destination(), engine_state(), boolean()) ->
   {ok, engine_state()}.
 move_variable({{_, _} = Source, Op}, Destination, #{impl := Impl} = State, false) ->
+  % source is a reference with operation
   {SourceVal, NewState1} = eval_var(Source, State),
   {SourceVal1, NewState2} = eval_operation(SourceVal, Op, NewState1),
-  {ok, _NewState3} = Impl:set_variable(NewState2, Destination, SourceVal1);
-move_variable(Source, Destination, State, false) ->
-  move_variable({{Source, nop}, Destination}, State, false);
+  {SourceVal2, NewState3} =
+    case SourceVal1 of
+      {Element, Rest} when is_list(Rest) ->
+        % list manipulation
+        {ok, S} = Impl:set_variable(NewState2, Source, Rest),
+        {Element, S};
+      _ ->
+        {SourceVal1, NewState2}
+    end,
+  {ok, _} = Impl:set_variable(NewState3, Destination, SourceVal2);
+move_variable({Type, _} = Source, Destination, State, false)
+  when Type =:= private orelse Type =:= global ->
+% source is variable reference
+  move_variable({Source, nop}, Destination, State, false);
+move_variable({SourceVal, Op}, Destination, #{impl:=Impl} = State, false) ->
+  % source is a literal with operation
+  {SourceVal1, NewState1} = eval_operation(SourceVal, Op, State),
+  Impl:set_variable(NewState1, Destination, SourceVal1);
+move_variable(Source, Destination, #{impl:=Impl} = State, false) ->
+% source is literal
+  {SourceVal1, NewState1} = eval_operation(Source, 'nop', State),
+  Impl:set_variable(NewState1, Destination, SourceVal1);
 move_variable(_, _, _, true) ->
   throw(not_implemented).
 
 -spec is_remote(source() | {source(), operation()}, destination()) ->
   boolean().
-is_remote({global, _ID1}, {global, _ID2}) ->
+is_remote({global, _ID1}, _) ->
+  % may be source list manipulation
   true;
 is_remote({{_, _ID1}, {_Op, {global, _OpArg}}}, {global, _}) ->
   true;
