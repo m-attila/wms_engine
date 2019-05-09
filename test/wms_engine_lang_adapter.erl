@@ -19,11 +19,10 @@
          get_history/0]).
 
 -export([save_state/1,
-         evaluate_variable/2,
          execute_interaction/3,
          wait_events/3,
          fire_event/2,
-         set_variable/3]).
+         set_variable/4, get_variable/2, transaction/2]).
 
 init() ->
   ?MODULE = ets:new(?MODULE, [set, public, named_table, {keypos, 1}]),
@@ -45,9 +44,10 @@ get_history() ->
 
 -spec set_variable(State :: engine_state(),
                    VariableRef :: variable_reference(),
-                   Literal :: literal()) ->
+                   Literal :: literal(),
+                   InTransation :: boolean()) ->
                     {ok, engine_state()}.
-set_variable(State, VariableRef, Literal) ->
+set_variable(State, VariableRef, Literal, _) ->
   ets:insert(?MODULE, {VariableRef, Literal}),
   {ok, State}.
 
@@ -57,15 +57,15 @@ save_state(State) ->
   ets:insert(?MODULE, {engine_state, State}),
   ok.
 
--spec evaluate_variable(State :: engine_state(),
-                        VariableRef :: variable_reference()) ->
-                         {term(), engine_state()}.
-evaluate_variable(State, VariableRef) ->
+-spec get_variable(Environment :: map(),
+                   Reference :: variable_reference()) ->
+                    {ok, Value :: literal()} | {error, Reason :: term()}.
+get_variable(State, VariableRef) ->
   case ets:lookup(?MODULE, VariableRef) of
     [] ->
-      throw({variable_not_found, VariableRef});
+      {error, {variable_not_found, VariableRef}};
     [{VariableRef, Value}] ->
-      {Value, State}
+      {ok, Value}
   end.
 
 -spec execute_interaction(State :: engine_state(),
@@ -95,6 +95,15 @@ wait_events(State, Type, EventIDS) ->
 fire_event(State, EventID) ->
   add_execution({fire, EventID}),
   {ok, State}.
+
+-spec transaction(StartEnvironment :: map(),
+                  Transaction :: transaction_fun()) ->
+                   {ok, map()} | {error, term()}.
+transaction(StartEnvironment, Transaction) ->
+  Transaction(StartEnvironment).
+
+
+
 
 add_execution(Term) ->
   [{execution, History}] = ets:lookup(?MODULE, execution),

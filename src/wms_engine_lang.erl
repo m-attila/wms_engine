@@ -25,12 +25,10 @@
 %% =============================================================================
 %% Callbacks
 %% =============================================================================
+-include_lib("wms_state/include/wms_state_variable_callbacks.hrl").
+
 -callback save_state(State :: engine_state()) ->
   ok.
-
--callback evaluate_variable(State :: engine_state(),
-                            VariableRef :: variable_reference()) ->
-                             {term(), engine_state()}.
 
 -callback execute_interaction(State :: engine_state(),
                               InteractionID :: identifier_name(),
@@ -43,11 +41,6 @@
 -callback fire_event(State :: engine_state(),
                      EventID :: identifier_name()) ->
                       {ok, engine_state()}.
-
--callback set_variable(State :: engine_state(),
-                       VariableRef :: variable_reference(),
-                       Literal :: literal()) ->
-                        {ok, engine_state()}.
 
 %% =============================================================================
 %% API functions
@@ -72,8 +65,11 @@
 %% throw : {parallel_errors, [error_tuplues], State}
 %% throw : {exit, error, Message, State}
 %% throw : {exit, ok, Message, State}
-%% throw : {invalid, eval_co, Operation, State}
+%% throw : {operation, Operation, State}
+%% throw : {variable, Operation, State}
+%% throw : {operator_arg, Operation, State}
 %% throw : {invalid, bool_op, Operation, State}
+%% throw : {invalid, eval_co, Operation, State}
 %% throw : {not_found, retval, RetValParName, State}
 %%-------------------------------------------------------------------
 %%
@@ -199,10 +195,10 @@ merge_state(#{executed := Into} = State, #{executed := From}) ->
 
 -spec create_parameter_values(engine_state(), [parameter_spec()]) ->
   [parameter_value()].
-create_parameter_values(State, ParameterSpec) ->
+create_parameter_values(#{impl :=Impl} = State, ParameterSpec) ->
   lists:map(
     fun({ParID, Ref}) ->
-      {Value, _} = eval_var(Ref, State),
+      {ok, Value} = wms_state:eval_var(Ref, Impl, State),
       {ParID, Value}
     end, ParameterSpec).
 
@@ -216,7 +212,8 @@ process_return_values(ReturnValueSpec, ReturnValues, #{impl := Impl} = State) ->
         true ->
           {ok, NState} = Impl:set_variable(PState,
                                            Destination,
-                                           maps:get(RetValParName, ReturnValues)),
+                                           maps:get(RetValParName, ReturnValues),
+                                           false),
           NState;
         false ->
           throw({not_found, retval, RetValParName, PState})
@@ -229,11 +226,11 @@ process_return_values(ReturnValueSpec, ReturnValues, #{impl := Impl} = State) ->
 
 -spec execute_cmd(command(), engine_state()) ->
   {ok, engine_state()}.
-execute_cmd({cmd, {error, VariableOrLiteral}}, State) ->
-  {Message, _} = eval_var(VariableOrLiteral, State),
+execute_cmd({cmd, {error, VariableOrLiteral}}, #{impl:=Impl} = State) ->
+  {ok, Message} = wms_state:eval_var(VariableOrLiteral, Impl, State),
   throw({exit, error, Message, State});
-execute_cmd({cmd, {exit, VariableOrLiteral}}, State) ->
-  {Message, _} = eval_var(VariableOrLiteral, State),
+execute_cmd({cmd, {exit, VariableOrLiteral}}, #{impl:=Impl} = State) ->
+  {ok, Message} = wms_state:eval_var(VariableOrLiteral, Impl, State),
   throw({exit, ok, Message, State});
 execute_cmd({cmd, {wait, WaitType, EventIDS}}, #{impl := Impl} = State) ->
   Impl:wait_events(State, WaitType, EventIDS);
@@ -290,10 +287,10 @@ eval_bo(Invalid, _, _, State) ->
 
 -spec eval_ce(comparator_expr(), engine_state()) ->
   {boolean(), engine_state()}.
-eval_ce({VariableRef, ComparatorOp, VariableOrLiteral}, State) ->
-  {Val1, NewState1} = eval_var(VariableRef, State),
-  {Val2, NewState2} = eval_var(VariableOrLiteral, NewState1),
-  eval_co(ComparatorOp, Val1, Val2, NewState2).
+eval_ce({VariableRef, ComparatorOp, VariableOrLiteral}, #{impl:=Impl} = State) ->
+  {ok, Val1} = wms_state:eval_var(VariableRef, Impl, State),
+  {ok, Val2} = wms_state:eval_var(VariableOrLiteral, Impl, State),
+  eval_co(ComparatorOp, Val1, Val2, State).
 
 %% -----------------------------------------------------------------------------
 %% Eval comparator operator
@@ -317,100 +314,16 @@ eval_co(Invalid, _, _, State) ->
   throw({invalid, eval_co, Invalid, State}).
 
 %% -----------------------------------------------------------------------------
-%% Eval variable reference
-%% -----------------------------------------------------------------------------
-
--spec eval_var(variable_or_literal(), engine_state()) ->
-  {term(), engine_state()}.
-eval_var({private, _} = Reference, #{impl:=Impl} = State) ->
-  Impl:evaluate_variable(State, Reference);
-eval_var({global, _} = Reference, #{impl:=Impl} = State) ->
-  Impl:evaluate_variable(State, Reference);
-eval_var(Literal, State) ->
-  {Literal, State}.
-
-%% -----------------------------------------------------------------------------
-%% Eval operation
-%% -----------------------------------------------------------------------------
-
--spec eval_operation(literal(), operation(), engine_state()) ->
-  {literal() | {literal(), [literal()]}, engine_state()}.
-eval_operation(Literal, {Operation, OpArg}, State) ->
-  {OpArgVal, NewState1} = eval_var(OpArg, State),
-  Result =
-    case wms_common:eval_operation(Literal, Operation, OpArgVal) of
-      {error, Reason} ->
-        throw({invalid, eval_operation, Reason, NewState1});
-      Value ->
-        Value
-    end,
-  {Result, NewState1};
-eval_operation(Literal, Operation, State) ->
-  Op = case Operation of
-         {Complex} ->
-           Complex;
-         _ ->
-           Operation
-       end,
-  Result =
-    case wms_common:eval_operation(Literal, Op) of
-      {error, Reason} ->
-        throw({invalid, eval_operation, Reason, State});
-      Value ->
-        Value
-    end,
-  {Result, State}.
-
-%% -----------------------------------------------------------------------------
 %% Move variable
 %% -----------------------------------------------------------------------------
 
--spec move_variable(source() | {source(), operation()}, destination(), engine_state()) ->
-  {ok, engine_state()}.
+-spec move_variable(source() | {source(), operation()},
+                    destination(), engine_state()) ->
+                     {ok, engine_state()}.
 
-move_variable(Source, Destination, State) ->
-  move_variable(Source, Destination, State, is_remote(Source, Destination)).
-
--spec move_variable(source() | {source(), operation()}, destination(), engine_state(), boolean()) ->
-  {ok, engine_state()}.
-move_variable({{_, _} = Source, Op}, Destination, #{impl := Impl} = State, false) ->
-  % source is a reference with operation
-  {SourceVal, NewState1} = eval_var(Source, State),
-  {SourceVal1, NewState2} = eval_operation(SourceVal, Op, NewState1),
-  {SourceVal2, NewState3} =
-    case SourceVal1 of
-      {Element, Rest} when is_list(Rest) ->
-        % list manipulation
-        {ok, S} = Impl:set_variable(NewState2, Source, Rest),
-        {Element, S};
-      _ ->
-        {SourceVal1, NewState2}
-    end,
-  {ok, _} = Impl:set_variable(NewState3, Destination, SourceVal2);
-move_variable({Type, _} = Source, Destination, State, false)
-  when Type =:= private orelse Type =:= global ->
-% source is variable reference
-  move_variable({Source, nop}, Destination, State, false);
-move_variable({SourceVal, Op}, Destination, #{impl:=Impl} = State, false) ->
-  % source is a literal with operation
-  {SourceVal1, NewState1} = eval_operation(SourceVal, Op, State),
-  Impl:set_variable(NewState1, Destination, SourceVal1);
-move_variable(Source, Destination, #{impl:=Impl} = State, false) ->
-% source is literal
-  {SourceVal1, NewState1} = eval_operation(Source, 'nop', State),
-  Impl:set_variable(NewState1, Destination, SourceVal1);
-move_variable(_, _, _, true) ->
-  throw(not_implemented).
-
--spec is_remote(source() | {source(), operation()}, destination()) ->
-  boolean().
-is_remote({global, _ID1}, _) ->
-  % may be source list manipulation
-  true;
-is_remote({{_, _ID1}, {_Op, {global, _OpArg}}}, {global, _}) ->
-  true;
-is_remote({{global, _ID1}, {_Op, {_, _OpArg}}}, {global, _}) ->
-  true;
-is_remote(_, _) ->
-  false.
-
+move_variable(Source, Destination, #{impl := Impl} = State) ->
+  try
+    {ok, _NewState} = wms_state:move_var(Source, Destination, Impl, State)
+  catch error : {badmatch, {error, R}} ->
+    throw(R)
+  end.

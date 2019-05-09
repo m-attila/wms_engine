@@ -7,7 +7,7 @@
 %%% Created : 03. May 2019 19:13
 %%%-------------------------------------------------------------------
 -author("Attila Makra").
-
+-include_lib("wms_state/include/wms_state.hrl").
 
 %% -----------------------------------------------------------------------------
 %% Execution states
@@ -25,18 +25,7 @@ executed := #{integer() := execution_result()}
 %% Base types.
 %% -----------------------------------------------------------------------------
 
--type identifier_name() :: binary().
-
--type variable_type() :: private | global.
--type variable_reference() :: {variable_type(), identifier_name()}.
--type literal(T) :: T.
--type literal() :: literal(term()).
-
 -type event_id() :: identifier_name().
-
--type variable_or_literal() :: literal() | variable_reference().
--type source() :: variable_or_literal().
--type destination() :: variable_reference().
 
 %% -----------------------------------------------------------------------------
 %% Operations

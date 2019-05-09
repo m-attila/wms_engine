@@ -14,7 +14,7 @@
   begin
     (fun() ->
       #{impl:=Impl} = State,
-      ?assertMatch({ExpectedValue, _}, Impl:evaluate_variable(State, VariableRef))
+      ?assertMatch({_, ExpectedValue}, Impl:get_variable(State, VariableRef))
      end)()
   end).
 
@@ -442,7 +442,7 @@ execute_move_test() ->
   DestinationPVar5 = {private, <<"DP5">>},
   DestinationPVar6 = {private, <<"DP6">>},
   DestinationPVar7 = {private, <<"DP7">>},
-  DestinationGVar = {global, <<"DP1">>},
+  DestinationPVar8 = {private, <<"DP8">>},
 
   % local move test
   Rules = [
@@ -450,7 +450,7 @@ execute_move_test() ->
               [],
               [
                 {cmd, {move, SourcePVar1, DestinationPVar1}},
-                {cmd, {move, SourcePVar1, DestinationGVar}},
+                {cmd, {move, SourcePVar1, DestinationPVar8}},
                 {cmd, {move, SourcePVar4, DestinationPVar2}},
                 {cmd, {move, 256, DestinationPVar3}},
                 % move with operation (local)
@@ -473,8 +473,7 @@ execute_move_test() ->
         try
           wms_engine_lang:execute(Compiled, State),
           ?assert(false)
-        catch throw: {invalid, eval_operation,
-                      {'+', {1, "a"}}, St} ->
+        catch throw: {operation, {'+', {1, "a"}}, St} ->
           St
         end,
       assert_exec_result(
@@ -489,7 +488,7 @@ execute_move_test() ->
         [<<"rule@1">>, <<"rule@1_cmd@9">>], undefined),
 
       ?CHK_VAR(NewState, SourcePVal1, DestinationPVar1),
-      ?CHK_VAR(NewState, SourcePVal1, DestinationGVar),
+      ?CHK_VAR(NewState, SourcePVal1, DestinationPVar8),
       ?CHK_VAR(NewState, SourceGVal, DestinationPVar2),
       ?CHK_VAR(NewState, 256, DestinationPVar3),
       ?CHK_VAR(NewState, 1 + 2, DestinationPVar4),
@@ -507,14 +506,14 @@ execute_move_test() ->
 
   % invalid operator with one args
   Rules1 = [
-            {rule, {
-              [],
-              [
-                % invalid operation with one args
-                {cmd, {move, {SourcePVar1, '!'}, DestinationPVar4}}
-              ]
-            }}
-          ],
+             {rule, {
+               [],
+               [
+                 % invalid operation with one args
+                 {cmd, {move, {SourcePVar1, '!'}, DestinationPVar4}}
+               ]
+             }}
+           ],
   Test1 =
     fun() ->
 
@@ -525,8 +524,7 @@ execute_move_test() ->
         try
           wms_engine_lang:execute(Compiled, State),
           ?assert(false)
-        catch throw: {invalid, eval_operation,
-                      {'!', 1}, St} ->
+        catch throw: {operation, {'!', 1}, St} ->
           St
         end,
       assert_exec_result(
