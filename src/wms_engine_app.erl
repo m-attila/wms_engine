@@ -6,9 +6,12 @@
 -module(wms_engine_app).
 
 -behaviour(application).
+-include("wms_engine.hrl").
 
 %% Application callbacks
--export([start/2, stop/1]).
+-export([start/2,
+         stop/1,
+         init/0]).
 
 %%====================================================================
 %% API
@@ -17,6 +20,8 @@
   {ok, Pid :: pid()} |
   {error, Reason :: term()}.
 start(_StartType, _StartArgs) ->
+  ok = wms_cfg:start_apps(?APP_NAME, [wms_dist, wms_db, wms_events]),
+  ok = init(),
   wms_engine_sup:start_link().
 
 %%--------------------------------------------------------------------
@@ -28,3 +33,8 @@ stop(_State) ->
 %%====================================================================
 %% Internal functions
 %%====================================================================
+
+-spec init() ->
+  ok.
+init() ->
+  ok.

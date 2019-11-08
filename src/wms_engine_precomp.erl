@@ -2,7 +2,13 @@
 %%% @author Attila Makra
 %%% @copyright (C) 2019, OTP Bank Nyrt.
 %%% @doc
-%%% Precompile WMS language
+%%% Precompile WMS language.
+%%% rule, rule_logikai kifejezés, call, parallel, cmd parancsokat
+%%% egészíti ki hierarchikus binaris cimkekkel
+%%% célja: hibakeresés
+%%% a már lefutott logikai érték visszaszerzése, hogy a megszakadt,
+%%% ismételt futás ne értékelje újra - tutira belemenjen
+%%% a már lefutottatott végrehajtások eredményei meglegyenek.
 %%% @end
 %%% Created : 04. May 2019 10:00
 %%%-------------------------------------------------------------------
@@ -36,6 +42,7 @@ stack := [level_state()]
 %% Functions
 %% =============================================================================
 
+% compile rules
 -spec compile([rule()]) ->
   {ok, [compiled_rule()]}.
 compile(Rules) ->
@@ -48,6 +55,7 @@ compile(Rules) ->
   {_, Compiled} = compile(Rules, [], State),
   {ok, lists:reverse(Compiled)}.
 
+% compiles all entries hierarchical
 -spec compile(entry() | [entry()],
               [compiled_entry()], state()) ->
                {state(), [compiled_entry()]}.
@@ -58,10 +66,12 @@ compile([Element | Rest], AccList, State) ->
   {NewState, NewAccList} = compile(Element, AccList, State),
   compile(Rest, NewAccList, NewState);
 
+% compile rule
 compile({rule, {LogicalExpression, Steps}}, AccList, State) ->
   {NewID, NewState} = new(rule, State),
   NewState1 = enter(NewID, NewState),
 
+  % compile steps of rule
   {NewState2, CompiledSteps} = compile(Steps, [], NewState1),
   NewState3 = leave(NewState2),
 
@@ -70,10 +80,12 @@ compile({rule, {LogicalExpression, Steps}}, AccList, State) ->
                    {LogicalExpression, lists:reverse(CompiledSteps)}}},
   {NewState3, [CompiledRule | AccList]};
 
+% compile interaction call
 compile({call, _} = Interaction, AccList, State) ->
   {NewID, NewState} = new(call, State),
   {NewState, [{NewID, Interaction} | AccList]};
 
+% compile parallel interaction calls
 compile({parallel, ParallelInteractions}, AccList, State) ->
   {NewID, NewState} = new(parallel, State),
   NewState1 = enter(NewID, NewState),
@@ -83,10 +95,13 @@ compile({parallel, ParallelInteractions}, AccList, State) ->
   CompiledParallel = {NewID, {parallel,
                               lists:reverse(CompiledInteractions)}},
   {NewState3, [CompiledParallel | AccList]};
+
+% compile workflow command
 compile({cmd, _} = Command, AccList, State) ->
   {NewID, NewState} = new(cmd, State),
   {NewState, [{NewID, Command} | AccList]}.
 
+% return all IDS of compiled entries
 -spec get_ids([compiled_entry()]) ->
   [binary()].
 get_ids(Compiled) ->
@@ -119,7 +134,7 @@ new(Counter, #{current_level := Current} = State) ->
    end,
    State#{current_level := Current#{Counter := N}}}.
 
-
+% enter subentries of current level
 -spec enter(binary(), state()) ->
   state().
 enter(ID, #{current_level := Current, stack := Stack} = State) ->
@@ -128,6 +143,7 @@ enter(ID, #{current_level := Current, stack := Stack} = State) ->
     stack := [Current | Stack]
   }.
 
+% leave current level, subentries are processed
 leave(#{stack := [Top | Rest]} = State) ->
   State#{
     current_level := Top,

@@ -15,8 +15,18 @@
 -type execution_result() :: term().
 
 -type engine_state() :: #{
-impl := atom(),
-executed := #{integer() := execution_result()}
+% implementation of wms_engine_lang
+impl := module(),
+% execution results of compiled entries (rule, call, parallel, cmd)
+executed := #{binary() := execution_result()},
+% private state variables
+private  := map(),
+% unique instance ID of the current task
+task_instance_id := binary(),
+% task name
+task_name := binary(),
+% stores received event under waiting
+event_received := [binary()]
 }.
 
 -type step_state() :: UniqueID :: binary().

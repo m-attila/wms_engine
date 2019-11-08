@@ -675,12 +675,15 @@ execute(TestFun, InitVars, InteractionReplies) ->
 
     TestFun()
   after
-    try
-      wms_engine_lang_adapter:destroy()
-    catch
-      _:_ ->
-        ok
-    end
+    destroy()
+  end.
+
+destroy() ->
+  try
+    wms_engine_lang_adapter:destroy()
+  catch
+    _:_ ->
+      ok
   end.
 
 assert_exec_result(#{executed := Executed}, AllID, ExpectedIDS, ExecResult) ->

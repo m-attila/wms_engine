@@ -9,6 +9,7 @@
 -module(wms_engine_lang).
 -author("Attila Makra").
 -include("wms_engine_lang.hrl").
+-include_lib("wms_logger/include/wms_logger.hrl").
 
 -ifdef(TEST).
 -compile([export_all]).
@@ -27,8 +28,7 @@
 %% =============================================================================
 -include_lib("wms_state/include/wms_state_variable_callbacks.hrl").
 
--callback save_state(State :: engine_state()) ->
-  ok.
+% variable handling behavior will be completed with command executions functions.
 
 -callback execute_interaction(State :: engine_state(),
                               InteractionID :: identifier_name(),
@@ -41,6 +41,12 @@
 -callback fire_event(State :: engine_state(),
                      EventID :: identifier_name()) ->
                       {ok, engine_state()}.
+
+-callback log_task_status(State :: engine_state(),
+                          Type ::
+                          started | wait | fire | interaction | aborted | done,
+                          Description :: term()) ->
+                           ok.
 
 %% =============================================================================
 %% API functions
@@ -71,13 +77,15 @@
 %% throw : {invalid, bool_op, Operation, State}
 %% throw : {invalid, eval_co, Operation, State}
 %% throw : {not_found, retval, RetValParName, State}
+%% throw : {not_found, variable, RetValParName, State}
 %%-------------------------------------------------------------------
 %%
 %% @end
 
 -spec execute(compiled_entry() | [compiled_entry()], engine_state()) ->
   {ok, engine_state()}.
-execute([], State) ->
+execute([], #{impl := Impl} = State) ->
+  ok = Impl:drop_state(State),
   {ok, State};
 execute([Entry | RestEntry], State) ->
   {ok, NewState} = execute_entry(Entry, State),
@@ -86,12 +94,16 @@ execute([Entry | RestEntry], State) ->
 %% -----------------------------------------------------------------------------
 %% Execute entry
 %% -----------------------------------------------------------------------------
+
+% execute one entry
 -spec execute_entry(compiled_entry(), engine_state()) ->
   {ok, engine_state()}.
 execute_entry({ID, _} = Entry, #{impl := Impl} = State) ->
   {ok, Result, NewState} = execute_entry(Entry,
                                          get_execution_result(ID, State),
                                          State),
+  % store execution result (purpose: will not be executed again if execution was
+  % aborted and restarted)
   NewState1 = store_execution_result(ID, Result, NewState),
   ok = Impl:save_state(NewState1),
   {ok, NewState1}.
@@ -113,6 +125,8 @@ store_execution_result(ID, Result, #{executed := Executed} = State) ->
 -spec execute_entry(compiled_entry(),
                     execution_result() | undefined, engine_state()) ->
                      {ok, execution_result(), engine_state()}.
+
+% execute rule which was not executed before
 execute_entry({ID, {rule, {LogicalExpression, Steps}}},
               undefined,
               #{impl := Impl} = State) ->
@@ -127,6 +141,8 @@ execute_entry({ID, {rule, {LogicalExpression, Steps}}},
         ok = Impl:save_state(St2),
         {EvalResult, St2};
       StoredResult ->
+        % logical expression already evaluated,
+        % (execution aborted previously, and restarted again)
         {StoredResult, State}
     end,
 
@@ -137,6 +153,8 @@ execute_entry({ID, {rule, {LogicalExpression, Steps}}},
     false ->
       {ok, false, NewState1}
   end;
+
+% execute interaction call which was not executed before
 execute_entry({_, {call, {InteractionID, ParameterSpec, ReturnValueSpec}}},
               undefined,
               #{impl := Impl} = State) ->
@@ -148,19 +166,25 @@ execute_entry({_, {call, {InteractionID, ParameterSpec, ReturnValueSpec}}},
                                           ReturnValues,
                                           NewState),
   {ok, true, NewState1};
+
+% execute parallel interaction call which was not executed before
 execute_entry({_, {parallel, ParallelInteractions}},
               undefined,
               State) ->
   parallel(ParallelInteractions, State);
+
+% execute workflow command which was not executed before
 execute_entry({_, {cmd, _} = Command}, undefined, State) ->
   {ok, NewState} = execute_cmd(Command, State),
   {ok, true, NewState};
+
+% entry already executed
 execute_entry(_, Result, State) ->
-  % already executed
   {ok, Result, State}.
 
 -spec parallel([compiled_interaction()], engine_state()) ->
   {ok, execution_result(), engine_state()}.
+% execute parallel interaction calls
 parallel(ParallelInteractions, #{impl := Impl} = State) ->
   ExecFun =
     fun({ID, _} = Entry, PState) ->
@@ -170,19 +194,22 @@ parallel(ParallelInteractions, #{impl := Impl} = State) ->
   ExecutionResults = wms_common:fork(ExecFun, [State],
                                      ParallelInteractions, infinity),
 
+  % merge executed command states and collect error
   {MergedState, Errors} =
     lists:foldl(
-      fun({ok, {ID, {ok, Result, _}}}, {CurrState, Errors}) ->
-        NewState = store_execution_result(ID, Result, CurrState),
-        ok = Impl:save_state(NewState),
-        {merge_state(CurrState, NewState), Errors};
+      fun
+        ({ok, {ID, {ok, Result, _}}}, {CurrState, Errors}) ->
+          NewState = store_execution_result(ID, Result, CurrState),
+          ok = Impl:save_state(NewState),
+          {merge_state(CurrState, NewState), Errors};
 
-         ({_, Error}, {CurrState, Errors}) ->
-           {CurrState, [Error | Errors]}
+        ({_, Error}, {CurrState, Errors}) ->
+          {CurrState, [Error | Errors]}
       end, {State, []}, ExecutionResults),
 
   case Errors of
     [] ->
+      % no errors was found
       {ok, true, MergedState};
     _ ->
       throw({parallel_errors, lists:usort(Errors), MergedState})
@@ -193,6 +220,7 @@ parallel(ParallelInteractions, #{impl := Impl} = State) ->
 merge_state(#{executed := Into} = State, #{executed := From}) ->
   State#{executed := maps:merge(Into, From)}.
 
+% create parameter map of interactions calls
 -spec create_parameter_values(engine_state(), [parameter_spec()]) ->
   [parameter_value()].
 create_parameter_values(#{impl :=Impl} = State, ParameterSpec) ->
@@ -202,6 +230,8 @@ create_parameter_values(#{impl :=Impl} = State, ParameterSpec) ->
       {ParID, Value}
     end, ParameterSpec).
 
+% process return values of interaction and set variables by
+% specification of return values
 -spec process_return_values([return_value_spec()],
                             return_values(), engine_state()) ->
                              {ok, engine_state()}.
@@ -233,6 +263,7 @@ execute_cmd({cmd, {exit, VariableOrLiteral}}, #{impl:=Impl} = State) ->
   {ok, Message} = wms_state:eval_var(VariableOrLiteral, Impl, State),
   throw({exit, ok, Message, State});
 execute_cmd({cmd, {wait, WaitType, EventIDS}}, #{impl := Impl} = State) ->
+  ok = Impl:save_state(State),
   Impl:wait_events(State, WaitType, EventIDS);
 execute_cmd({cmd, {fire, EventID}}, #{impl := Impl} = State) ->
   Impl:fire_event(State, EventID);
@@ -325,5 +356,6 @@ move_variable(Source, Destination, #{impl := Impl} = State) ->
   try
     {ok, _NewState} = wms_state:move_var(Source, Destination, Impl, State)
   catch error : {badmatch, {error, R}} ->
+    ?error("move_variable: ~p -> ~p", [Source, Destination]),
     throw(R)
   end.

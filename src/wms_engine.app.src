@@ -5,11 +5,12 @@
   {mod, {wms_engine_app, []}},
   {applications,
    [kernel,
-    stdlib
+    stdlib,
+    mnesia,
+    wms_cfg
    ]},
   {env,[]},
-  {modules, [wms_engine_precomp, wms_engine_lang]},
-
+  {modules, [wms_engine, wms_engine_precomp, wms_engine_lang, wms_engine_db_state]},
   {licenses, ["Apache 2.0"]},
   {links, []}
  ]}.

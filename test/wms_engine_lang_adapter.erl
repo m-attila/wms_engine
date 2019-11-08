@@ -22,7 +22,12 @@
          execute_interaction/3,
          wait_events/3,
          fire_event/2,
-         set_variable/4, get_variable/2, transaction/2]).
+         set_variable/4,
+         get_variable/2,
+         transaction/2,
+         drop_state/1,
+         load_state/1,
+         log_task_status/3]).
 
 init() ->
   ?MODULE = ets:new(?MODULE, [set, public, named_table, {keypos, 1}]),
@@ -57,10 +62,20 @@ save_state(State) ->
   ets:insert(?MODULE, {engine_state, State}),
   ok.
 
+-spec drop_state(State :: engine_state()) ->
+  ok.
+drop_state(_State) ->
+  ok.
+
+-spec load_state(InitialState :: map()) ->
+  not_found | map().
+load_state(_) ->
+  throw(not_implemented).
+
 -spec get_variable(Environment :: map(),
                    Reference :: variable_reference()) ->
                     {ok, Value :: literal()} | {error, Reason :: term()}.
-get_variable(State, VariableRef) ->
+get_variable(_State, VariableRef) ->
   case ets:lookup(?MODULE, VariableRef) of
     [] ->
       {error, {variable_not_found, VariableRef}};
@@ -95,6 +110,9 @@ wait_events(State, Type, EventIDS) ->
 fire_event(State, EventID) ->
   add_execution({fire, EventID}),
   {ok, State}.
+
+log_task_status(_State, _Type, _Description) ->
+  ok.
 
 -spec transaction(StartEnvironment :: map(),
                   Transaction :: transaction_fun()) ->
