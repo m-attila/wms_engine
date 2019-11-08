@@ -16,15 +16,14 @@
 
 %% API
 -export([start_link/0,
-         is_running_task/0, manual_start_task/1, event_fired/2]).
+         is_running_task/0,
+         manual_start_task/1,
+         event_fired/2]).
 -export([init/1,
          handle_info/2,
          handle_call/3,
          handle_cast/2,
          execute_wrapper/4]).
-
--define(CHARS,
-  <<"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789">>).
 
 %% =============================================================================
 %% Private types
@@ -234,7 +233,7 @@ start_new_task(#taskdef{task_name = TaskName,
   State;
 start_new_task(#taskdef{task_name  = TaskName,
                         definition = Rules}, State) ->
-  TaskInstanceID = generate_instance_id(64),
+  TaskInstanceID = wms_common:generate_unique_id(64),
 
   Pid = spawn_link(?MODULE,
                    execute_wrapper,
@@ -305,52 +304,6 @@ task_exited(Pid, #state{task_processes = TaskProcesses} = State) ->
     TaskInstanceID ->
       State#state{task_processes = rem_task(TaskProcesses, Pid, TaskInstanceID)}
   end.
-
-%% -----------------------------------------------------------------------------
-%% Generate instance ID
-%% -----------------------------------------------------------------------------
-
--spec generate_instance_id(pos_integer()) ->
-  binary().
-generate_instance_id(ReqSize) ->
-  [_ | Host] =
-    re:split(atom_to_list(node()),
-             "@",
-             [{return, list}, {parts, 2}]),
-  SysTime = integer_to_binary(os:system_time()),
-
-
-  Temp = <<SysTime/binary, (list_to_binary(Host))/binary>>,
-
-  Rest = ReqSize - byte_size(Temp),
-
-  Plain = case Rest =< 0 of
-            true ->
-              Temp;
-            false ->
-              <<Temp/binary, (crypto:strong_rand_bytes(Rest))/binary>>
-          end,
-  decode(Plain, ?CHARS, byte_size(?CHARS), <<>>).
-
-
--spec decode(binary(), binary(), pos_integer(), binary()) ->
-  binary().
-decode(<<>>, _, _, Accu) ->
-  Accu;
-decode(<<V:8/integer, Rest/binary>>, Codes, LenghOfCodes, Accu) ->
-  High = V div LenghOfCodes,
-  Low = V rem LenghOfCodes,
-
-  NewAccu =
-    case {High, Low} of
-      {0, Low} ->
-        <<Accu/binary, (binary:at(Codes, Low))/integer>>;
-      {High, Low} ->
-        <<Accu/binary,
-          (binary:at(Codes, Low))/integer,
-          (binary:at(Codes, High))/integer>>
-    end,
-  decode(Rest, Codes, LenghOfCodes, NewAccu).
 
 -spec process_incoming_event(binary(), binary(), state()) ->
   ok | {error, not_found}.
