@@ -76,9 +76,21 @@ load_state(InitialState) ->
                           InteractionID :: identifier_name(),
                           ParameterValues :: [parameter_value()]) ->
                            {ok, return_values(), engine_state()}.
-execute_interaction(State, InteractionID, ParameterValues) ->
+execute_interaction(#{task_instance_id := TaskInstanceID} = State,
+                    InteractionID, ParameterValues) ->
   log_task_status(State, interaction, {InteractionID, ParameterValues}),
-  throw(not_impl).
+
+  InteractionRequestID = wms_common:generate_unique_id(64),
+
+  ok = wms_dist:call(wms_distributor_actor,
+                     interaction, [TaskInstanceID,
+                                   InteractionID,
+                                   InteractionRequestID,
+                                   ParameterValues]),
+
+  ReturnValues = receive_interaction_messages(InteractionRequestID),
+
+  {ok, ReturnValues, State}.
 
 -spec wait_events(State :: engine_state(),
                   wait_type(),
@@ -185,6 +197,18 @@ receive_events(all, EventIDS, #{task_instance_id := TaskInstanceID,
       receive_events(all, EventIDS, NewState)
   end.
 
+-spec receive_interaction_messages(identifier_name()) ->
+  {ok, return_values()} | {error, term()}.
+receive_interaction_messages(InteractionRequestID) ->
+  Keepalive = wms_cfg:get(wms_dist, keepalive, undefined) * 2,
 
-
+  receive
+    {interaction_reply, InteractionRequestID, Reply} ->
+      Reply;
+    {keepalive, InteractionRequestID} ->
+      receive_interaction_messages(InteractionRequestID)
+  after
+    Keepalive ->
+      {error, broken}
+  end.
 

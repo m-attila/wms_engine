@@ -4,10 +4,10 @@
        {ref,"640718ee7fde7d5bac0c5d228d0a4acd8712f719"}},
   1},
  {<<"goldrush">>,{pkg,<<"goldrush">>,<<"0.1.9">>},5},
- {<<"lager">>,{pkg,<<"lager">>,<<"3.6.10">>},4},
+ {<<"lager">>,{pkg,<<"lager">>,<<"3.8.0">>},4},
  {<<"wms_cfg">>,
   {git,"git@github.com:m-attila/wms_cfg.git",
-       {ref,"587c9370ee8767d0e45cf4a6a2b837af8a9c3d52"}},
+       {ref,"24d9006d07feb30083c47fa182ae9bc25fc4cca6"}},
   2},
  {<<"wms_common">>,
   {git,"git@github.com:m-attila/wms_common.git",
@@ -15,19 +15,19 @@
   2},
  {<<"wms_db">>,
   {git,"git@github.com:m-attila/wms_db.git",
-       {ref,"c84ec893f9c56386133e2167599078ba624c2155"}},
+       {ref,"633a50c207c3ab7ca9e4e327ab6e4aa9aaf6abb1"}},
   0},
  {<<"wms_dist">>,
   {git,"git@github.com:m-attila/wms_dist.git",
-       {ref,"efc1418466a95f4dca70132eaf7e4894062d6a92"}},
+       {ref,"ed50cdd9bda08673e0caba07f79f63c4722c2108"}},
   1},
  {<<"wms_events">>,
   {git,"git@github.com:m-attila/wms_events.git",
-       {ref,"1c5b04d24c131347a85f8269f6ffb99cca92ce19"}},
+       {ref,"b8b9ed781889ba6a5ff7edddd844c085e9c0e697"}},
   0},
  {<<"wms_logger">>,
   {git,"git@github.com:m-attila/wms_logger.git",
-       {ref,"9e86927d6c6a29ae77746c3539d88e1c687010dc"}},
+       {ref,"9733c423ebe432f2577cf7e08c27afdd090dd3b9"}},
   3},
  {<<"wms_state">>,
   {git,"git@github.com:m-attila/wms_state.git",
@@ -36,5 +36,5 @@
 [
 {pkg_hash,[
  {<<"goldrush">>, <<"F06E5D5F1277DA5C413E84D5A2924174182FB108DABB39D5EC548B27424CD106">>},
- {<<"lager">>, <<"6172B43AB720AC33914CCD0AEB21FDBDF88213847707D4B91E6AF57B2AE5C4D2">>}]}
+ {<<"lager">>, <<"3402B9A7E473680CA179FC2F1D827CAB88DD37DD1E6113090C6F45EF05228A1C">>}]}
 ].

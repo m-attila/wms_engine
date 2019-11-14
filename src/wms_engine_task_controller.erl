@@ -18,7 +18,8 @@
 -export([start_link/0,
          is_running_task/0,
          manual_start_task/1,
-         event_fired/2]).
+         event_fired/2,
+         interaction_reply/4, keepalive/3]).
 -export([init/1,
          handle_info/2,
          handle_call/3,
@@ -67,6 +68,22 @@ manual_start_task(TaskName) ->
 event_fired(TaskInstanceID, EventID) ->
   gen_server:call(?MODULE, {event_fired, TaskInstanceID, EventID}).
 
+-spec interaction_reply(identifier_name(), identifier_name(),
+                        identifier_name(),
+                        {ok, map()} | {error, term()}) ->
+                         ok | {error, term()}.
+interaction_reply(TaskInstanceID, InteractionID, InteractionRequestID, Reply) ->
+  gen_server:call(?MODULE,
+                  {interaction_reply,
+                   TaskInstanceID, InteractionID, InteractionRequestID, Reply}).
+
+-spec keepalive(identifier_name(), identifier_name(), identifier_name()) ->
+  ok | {error, term()}.
+keepalive(TaskInstanceID, InteractionID, InteractionRequestID) ->
+  gen_server:call(?MODULE,
+                  {keepalive, TaskInstanceID, InteractionID, InteractionRequestID}).
+
+
 %% =============================================================================
 %% gen_server behaviour
 %% =============================================================================
@@ -112,11 +129,41 @@ handle_call({manual_start_task, TaskName}, _Form, State) ->
   ?error("Cannot be start ~s task, because controller not initialized yet",
          [TaskName]),
   {reply, {error, not_initialized}, State};
+
 handle_call({event_fired, TaskInstanceID, EventID}, _From,
             #state{phase = started} = State) ->
   {reply, process_incoming_event(TaskInstanceID, EventID, State), State};
 handle_call({event_fired, _, EventID}, _From, State) ->
   ?warning("Not initialized yet, ~s event notification dropped", [EventID]),
+  {reply, {error, not_initialized}, State};
+
+handle_call({interaction_reply,
+             TaskInstanceID, InteractionID, InteractionRequestID, Reply},
+            _From, #state{phase = started} = State) ->
+  {reply, process_interaction_reply(TaskInstanceID,
+                                    InteractionID,
+                                    InteractionRequestID,
+                                    Reply,
+                                    State), State};
+handle_call({interaction_reply,
+             _TaskInstanceID, InteractionID, _InteractionRequestID, _Reply},
+            _From, State) ->
+  ?warning("Not initialized yet, interaction reply was dropped ~s",
+           [InteractionID]),
+  {reply, {error, not_initialized}, State};
+
+handle_call({keepalive,
+             TaskInstanceID, InteractionID, InteractionRequestID},
+            _From, #state{phase = started} = State) ->
+  {reply, process_keepalive(TaskInstanceID,
+                            InteractionID,
+                            InteractionRequestID,
+                            State), State};
+handle_call({keepalive,
+             _TaskInstanceID, InteractionID, _InteractionRequestID, _Reply},
+            _From, State) ->
+  ?warning("Not initialized yet, keepalive was dropped ~s",
+           [InteractionID]),
   {reply, {error, not_initialized}, State}.
 
 -spec handle_cast(Request :: any(), State :: state()) ->
@@ -317,5 +364,33 @@ process_incoming_event(TaskInstanceID,
       ?debug("~s task instance was advised for event ~s",
              [TaskInstanceID, EventID]),
       Pid ! {event_fired, EventID},
+      ok
+  end.
+
+-spec process_interaction_reply(identifier_name(), identifier_name(), identifier_name(), map(), state()) ->
+  ok | {error, not_found}.
+process_interaction_reply(TaskInstanceID, InteractionID, InteractionRequestID, Reply,
+                          #state{task_processes = TaskProcesses}) ->
+  case maps:get(TaskInstanceID, TaskProcesses, undefined) of
+    undefined ->
+      ?warning("~s task instance ID does not exists", [TaskInstanceID]),
+      {error, not_found};
+    Pid ->
+      ?debug("~s task instance was advised for ~s interaction result: ~p",
+             [TaskInstanceID, InteractionID, Reply]),
+      Pid ! {interaction_reply, InteractionRequestID, Reply},
+      ok
+  end.
+
+process_keepalive(TaskInstanceID, InteractionID, InteractionRequestID,
+                  #state{task_processes = TaskProcesses}) ->
+  case maps:get(TaskInstanceID, TaskProcesses, undefined) of
+    undefined ->
+      ?warning("~s task instance ID does not exists", [TaskInstanceID]),
+      {error, not_found};
+    Pid ->
+      ?debug("~s task instance was advised for ~s keepalive",
+             [TaskInstanceID, InteractionID]),
+      Pid ! {keepalive, InteractionRequestID},
       ok
   end.
