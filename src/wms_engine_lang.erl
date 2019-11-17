@@ -318,6 +318,16 @@ eval_bo(Invalid, _, _, State) ->
 
 -spec eval_ce(comparator_expr(), engine_state()) ->
   {boolean(), engine_state()}.
+eval_ce({{_, VariableName} = VariableRef, exists, Literal}, #{impl:=Impl} = State) ->
+  Exists =
+    try
+      {ok, _} = wms_state:eval_var(VariableRef, Impl, State),
+      true
+    catch
+      _:{badmatch, {error, {not_found, variable, VariableName, _}}} ->
+        false
+    end,
+  eval_co('=', Literal, Exists, State);
 eval_ce({VariableRef, ComparatorOp, VariableOrLiteral}, #{impl:=Impl} = State) ->
   {ok, Val1} = wms_state:eval_var(VariableRef, Impl, State),
   {ok, Val2} = wms_state:eval_var(VariableOrLiteral, Impl, State),

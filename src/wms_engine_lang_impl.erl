@@ -22,7 +22,8 @@
          wait_events/3,
          fire_event/2,
          drop_state/1,
-         load_state/1, log_task_status/3]).
+         load_state/1,
+         log_task_status/3]).
 
 
 %% -----------------------------------------------------------------------------
@@ -32,6 +33,10 @@
 % változó értékét adja vissza
 -spec get_variable(Environment :: map(), Reference :: variable_reference()) ->
   {ok, Value :: literal()} | {error, Reason :: term()}.
+get_variable(_Environment, {private, now}) ->
+  {ok, calendar:local_time()};
+get_variable(_Environment, {global, now}) ->
+  {ok, calendar:local_time()};
 get_variable(Environment, Reference) ->
   wms_engine_db_state:get_variable(Environment, Reference).
 
@@ -78,38 +83,59 @@ load_state(InitialState) ->
                            {ok, return_values(), engine_state()}.
 execute_interaction(#{task_instance_id := TaskInstanceID} = State,
                     InteractionID, ParameterValues) ->
-  log_task_status(State, interaction, {InteractionID, ParameterValues}),
 
-  InteractionRequestID = wms_common:generate_unique_id(64),
+  wms_engine_task_controller:change_task_status(TaskInstanceID,
+                                                wait_interaction,
+                                                {InteractionID, ParameterValues}),
 
-  ok = wms_dist:call(wms_distributor_actor,
-                     interaction, [TaskInstanceID,
-                                   InteractionID,
-                                   InteractionRequestID,
-                                   ParameterValues]),
+  try
+    log_task_status(State, interaction, {InteractionID, ParameterValues}),
+    InteractionRequestID = wms_common:generate_unique_id(64),
 
-  ReturnValues = receive_interaction_messages(InteractionRequestID),
+    ok = wms_dist:call(wms_distributor_actor,
+                       interaction, [TaskInstanceID,
+                                     InteractionID,
+                                     InteractionRequestID,
+                                     ParameterValues]),
 
-  {ok, ReturnValues, State}.
+    ReturnValues = receive_interaction_messages(InteractionRequestID),
+
+    {ok, ReturnValues, State}
+  after
+    wms_engine_task_controller:change_task_status(TaskInstanceID,
+                                                  running, undefined)
+
+  end.
 
 -spec wait_events(State :: engine_state(),
                   wait_type(),
                   EventIDS :: [identifier_name()]) ->
                    {ok, engine_state()}.
-wait_events(#{task_instance_id := TaskInstanceID} = State, WaitType, EventIDS) ->
-  log_task_status(State, wait, {WaitType, EventIDS}),
-  purge_event_messages(),
+wait_events(#{task_instance_id := TaskInstanceID} = State, WaitType, OEventIDS) ->
+  EventIDS = replace_built_in_event_ids(OEventIDS),
+  wms_engine_task_controller:change_task_status(TaskInstanceID,
+                                                wait_event,
+                                                {WaitType, EventIDS}),
 
-  [ok = wms_dist:call(wms_events_actor,
-                      subscribe,
-                      [wms_common:timestamp(), EventID, TaskInstanceID]) ||
-    EventID <- EventIDS],
 
-  receive_events(WaitType, EventIDS, State),
+  try
+    log_task_status(State, wait, {WaitType, EventIDS}),
+    purge_event_messages(),
 
-  NewState = State#{event_received := []},
+    [ok = wms_dist:call(wms_events_actor,
+                        subscribe,
+                        [wms_common:timestamp(), EventID, TaskInstanceID]) ||
+      EventID <- EventIDS],
 
-  {ok, NewState}.
+    receive_events(WaitType, EventIDS, State),
+
+    NewState = State#{event_received := []},
+
+    {ok, NewState}
+  after
+    wms_engine_task_controller:change_task_status(TaskInstanceID,
+                                                  running, undefined)
+  end.
 
 
 -spec fire_event(State :: engine_state(),
@@ -156,7 +182,9 @@ receive_events(any, EventIDS, #{event_received := []} = State) ->
   ReceivedEventID =
     receive
       {event_fired, EventID} ->
-        EventID
+        EventID;
+      stop ->
+        throw(task_aborted)
     end,
 
   case lists:member(ReceivedEventID, EventIDS) of
@@ -206,9 +234,21 @@ receive_interaction_messages(InteractionRequestID) ->
     {interaction_reply, InteractionRequestID, Reply} ->
       Reply;
     {keepalive, InteractionRequestID} ->
-      receive_interaction_messages(InteractionRequestID)
+      receive_interaction_messages(InteractionRequestID);
+    stop ->
+      throw(task_aborted)
   after
     Keepalive ->
       {error, broken}
   end.
 
+-spec replace_built_in_event_ids([event_id() | {mandatory, event_id()} | timer]) ->
+  [event_id() | {mandatory, event_id()}].
+replace_built_in_event_ids(EventIDS) ->
+  lists:map(
+    fun
+      (timer) ->
+        ?TIMER_EVENT_ID;
+      (Other) ->
+        Other
+    end, EventIDS).

@@ -10,8 +10,10 @@
 -author("Attila Makra").
 -behaviour(gen_server).
 
+-include("wms_engine.hrl").
 -include("wms_engine_lang.hrl").
 -include_lib("wms_logger/include/wms_logger.hrl").
+-include_lib("wms_common/include/wms_common.hrl").
 -include_lib("wms_db/include/wms_db_datatypes.hrl").
 
 %% API
@@ -19,26 +21,42 @@
          is_running_task/0,
          manual_start_task/1,
          event_fired/2,
-         interaction_reply/4, keepalive/3]).
+         interaction_reply/4,
+         keepalive/3,
+         delete_task_definition/1,
+         add_task_definition/3,
+         get_running_task_instances/0,
+         change_task_status/3,
+         stop_task/1]).
 -export([init/1,
          handle_info/2,
          handle_call/3,
          handle_cast/2,
-         execute_wrapper/4]).
+         execute_wrapper/5]).
 
 %% =============================================================================
 %% Private types
 %% =============================================================================
--type phase() :: wait_for_db | load_definitions | start_aborted_tasks | started.
+-export_type([task_running_status/0]).
 
+-type phase() :: wait_for_db | load_definitions | start_aborted_tasks | started.
+-type task_running_status() :: running | wait_event | wait_interaction.
+
+% @formatter:off
 -record(state, {
   phase = wait_for_db :: phase(),
+  % task's instances
   taskdef_instances :: [{taskdef(), [binary()]}],
+  % running task instances and pids
   task_processes = #{} :: #{
-  pid() => binary(),
-  binary() => pid()
+    pid() => binary(),
+    binary() => pid()
+  },
+  task_status = #{} :: #{
+    binary() => {task_running_status(), timestamp(), term()}
   }
 }).
+% @formatter:on
 -type state() :: #state{}.
 
 %%%===================================================================
@@ -83,6 +101,35 @@ keepalive(TaskInstanceID, InteractionID, InteractionRequestID) ->
   gen_server:call(?MODULE,
                   {keepalive, TaskInstanceID, InteractionID, InteractionRequestID}).
 
+-spec delete_task_definition(identifier_name()) ->
+  ok | {error, term()}.
+delete_task_definition(TaskName) ->
+  gen_server:call(?MODULE, {delete_task_definition, TaskName}).
+
+-spec add_task_definition(binary(), taskdef_type(), term()) ->
+  ok.
+add_task_definition(TaskName, Type, Definition) ->
+  gen_server:call(?MODULE, {add_task_definition, TaskName, Type, Definition}).
+
+-spec change_task_status(identifier_name(), task_running_status(), term()) ->
+  ok.
+change_task_status(TaskInstanceID, Status, Term) ->
+  gen_server:cast(?MODULE, {change_task_status, TaskInstanceID, Status, Term}).
+
+-spec get_running_task_instances() ->
+  [{
+    identifier_name(),
+    [
+    {identifier_name(), {task_running_status(), timestamp(), term()}}
+    ]
+  }].
+get_running_task_instances() ->
+  gen_server:call(?MODULE, get_running_task_instances).
+
+-spec stop_task(identifier_name()) ->
+  ok | {error, term()}.
+stop_task(TaskInstanceID) ->
+  gen_server:call(?MODULE, {stop_task, TaskInstanceID}).
 
 %% =============================================================================
 %% gen_server behaviour
@@ -109,8 +156,31 @@ handle_info(start, State) ->
 %% Task process exited signal.
 %% -----------------------------------------------------------------------------
 
-handle_info({'EXIT', Pid, _}, State) ->
-  {noreply, task_exited(Pid, State)};
+handle_info({'EXIT', Pid, {TaskType, TaskName, _}}, State) ->
+  case TaskType of
+    auto ->
+      spawn(
+        fun() ->
+          ?debug("~s auto type task was restarted", [TaskName]),
+          wms_engine_task_controller:manual_start_task(TaskName)
+        end);
+    _ ->
+      ok
+  end,
+  NewState = task_exited(Pid, State),
+  {noreply, NewState};
+
+handle_info(timer_event, #state{phase = started} = State) ->
+  spawn(
+    fun() ->
+      wms_dist:call(wms_events_actor,
+                    fire_event,
+                    [wms_common:timestamp(), ?TIMER_EVENT_ID])
+    end),
+
+  setup_timer_event(),
+  {noreply, State};
+
 
 handle_info(Msg, State) ->
   ?warning("Unknown message: ~0p", [Msg]),
@@ -164,10 +234,92 @@ handle_call({keepalive,
             _From, State) ->
   ?warning("Not initialized yet, keepalive was dropped ~s",
            [InteractionID]),
-  {reply, {error, not_initialized}, State}.
+  {reply, {error, not_initialized}, State};
+
+handle_call({delete_task_definition, TaskName}, _From,
+            #state{taskdef_instances = Instances} = State) ->
+  NewInstances =
+    lists:filter(
+      fun({#taskdef{task_name = N}, _}) ->
+        N =/= TaskName
+      end, Instances),
+  Reply =
+    case Instances of
+      NewInstances ->
+        {error, not_found};
+      _ ->
+        ?info("~s task definition was deleted", [TaskName]),
+        ok
+    end,
+  {reply, Reply, State#state{taskdef_instances = NewInstances}};
+
+handle_call({add_task_definition, TaskName, Type, Definition}, _From,
+            #state{taskdef_instances = Instances} = State) ->
+
+  IsExists =
+    lists:any(
+      fun({#taskdef{task_name = Name}, _}) ->
+        Name =:= TaskName
+      end, Instances),
+
+  NewInstances =
+    case IsExists of
+      true ->
+        ?info("Task definition was modified: ~s", [TaskName]),
+        lists:map(
+          fun
+            ({#taskdef{task_name = Name} = TD, Inst}) when Name =:= TaskName ->
+              {TD#taskdef{type = Type, definition = Definition}, Inst};
+            (Other) ->
+              Other
+          end, Instances);
+      false ->
+        ?info("New task definition inserted: ~s", [TaskName]),
+        [{                          #taskdef{
+          task_name  = TaskName,
+          type       = Type,
+          definition = Definition}, []} | Instances]
+    end,
+
+  {reply, ok, State#state{taskdef_instances = NewInstances}};
+
+handle_call(get_running_task_instances, _From,
+            #state{taskdef_instances = Instances,
+                   task_status       = Status} = State) ->
+
+  Reply = lists:map(
+    fun({#taskdef{task_name = Name}, Inst}) ->
+      {Name,
+       lists:map(
+         fun(TaskInstanceID) ->
+           {TaskInstanceID, maps:get(TaskInstanceID, Status, undefined)}
+         end,
+         Inst)}
+    end, Instances),
+  {reply, Reply, State};
+
+handle_call({stop_task, TaskInstanceID}, _From,
+            #state{task_processes = Processes} = State) ->
+  Reply =
+    case maps:get(TaskInstanceID, Processes, undefined) of
+      undefined ->
+        ?error("~s task instance not running", [TaskInstanceID]),
+        {error, not_found};
+      Pid ->
+        ?debug("stop command was send to ~s task instance", [TaskInstanceID]),
+        Pid ! stop,
+        ok
+    end,
+  {reply, Reply, State}.
 
 -spec handle_cast(Request :: any(), State :: state()) ->
   {noreply, State :: state()}.
+
+handle_cast({change_task_status, TaskInstanceID, TaskStatus, Term},
+            #state{task_status = Status} = State) ->
+  NewStatus = Status#{TaskInstanceID => {TaskStatus, wms_common:timestamp(), Term}},
+  {noreply, State#state{task_status = NewStatus}};
+
 handle_cast(_, State) ->
   {noreply, State}.
 
@@ -250,12 +402,19 @@ start_aborted_task_instances(#taskdef{task_name = TaskName} = TaskDef,
   state().
 start_new_tasks([], State) ->
   ?info("Phase end: start_new_tasks"),
+  setup_timer_event(),
   State#state{phase = started};
 start_new_tasks([{#taskdef{type = auto} = TaskDef, []} | Rest], State) ->
   NewState = start_new_task(TaskDef, State),
   start_new_tasks(Rest, NewState);
 start_new_tasks([_ | Rest], State) ->
   start_new_tasks(Rest, State).
+
+-spec setup_timer_event() ->
+  any().
+setup_timer_event() ->
+  TimerEvent = wms_cfg:get(?APP_NAME, timer_event_delay, 30000),
+  erlang:send_after(TimerEvent, self(), timer_event).
 
 %% -----------------------------------------------------------------------------
 %% Start new task by manually
@@ -279,42 +438,64 @@ start_new_task(#taskdef{task_name = TaskName,
   ?error("~s task was not started, because it is disabled", [TaskName]),
   State;
 start_new_task(#taskdef{task_name  = TaskName,
-                        definition = Rules}, State) ->
-  TaskInstanceID = wms_common:generate_unique_id(64),
+                        definition = Rules,
+                        type       = Type} = TD,
+               #state{taskdef_instances = Instances} = State) ->
 
-  Pid = spawn_link(?MODULE,
-                   execute_wrapper,
-                   [Rules, TaskName, TaskInstanceID, false]),
+  DisableStart =
+    case Type of
+      auto ->
+        lists:any(
+          fun({#taskdef{task_name = N}, Inst}) ->
+            N =:= TaskName andalso Inst =/= []
+          end, Instances);
+      _ ->
+        false
+    end,
 
-  ?info("~s task started", [TaskName]),
-  add_task(TaskInstanceID, Pid, State).
+  case DisableStart of
+    false ->
+      TaskInstanceID = wms_common:generate_unique_id(64),
+
+      Pid = spawn_link(?MODULE,
+                       execute_wrapper,
+                       [Rules, Type, TaskName, TaskInstanceID, false]),
+
+      ?info("~s task started", [TaskName]),
+      add_task(TaskName, TaskInstanceID, Pid, State);
+    true ->
+      ?info("~s auto type task already running", [TaskName]),
+      State
+  end.
+
 
 -spec start_aborted_task(taskdef(), binary(), state()) ->
   state().
 start_aborted_task(#taskdef{task_name  = TaskName,
-                            definition = Rules}, TaskInstanceID, State) ->
+                            definition = Rules,
+                            type       = Type}, TaskInstanceID, State) ->
   Pid = spawn_link(?MODULE,
                    execute_wrapper,
-                   [Rules, TaskName, TaskInstanceID, true]),
+                   [Rules, Type, TaskName, TaskInstanceID, true]),
 
   ?info("~s/~s instance was restarted", [TaskName, TaskInstanceID]),
-  add_task(TaskInstanceID, Pid, State).
+  add_task(TaskName, TaskInstanceID, Pid, State).
 
 %% -----------------------------------------------------------------------------
 %% Task registration
 %% -----------------------------------------------------------------------------
 
--spec execute_wrapper([rule()], binary(), binary(), boolean()) ->
+-spec execute_wrapper([rule()], taskdef_type(), binary(), binary(), boolean()) ->
   no_return().
-execute_wrapper(Rules, TaskName, TaskInstanceID, false) ->
+execute_wrapper(Rules, TaskType, TaskName, TaskInstanceID, false) ->
   wms_db:add_task_instance(TaskName, TaskInstanceID),
-  execute_wrapper(Rules, TaskInstanceID, TaskName);
-execute_wrapper(Rules, TaskName, TaskInstanceID, true) ->
-  execute_wrapper(Rules, TaskInstanceID, TaskName).
+  execute_wrapper(Rules, TaskType, TaskInstanceID, TaskName);
+execute_wrapper(Rules, TaskType, TaskName, TaskInstanceID, true) ->
+  execute_wrapper(Rules, TaskType, TaskInstanceID, TaskName).
 
--spec execute_wrapper([rule()], binary(), binary()) ->
+-spec execute_wrapper([rule()], taskdef_type(), binary(), binary()) ->
   no_return().
-execute_wrapper(Rules, TaskInstanceID, TaskName) ->
+execute_wrapper(Rules, TaskType, TaskInstanceID, TaskName) ->
   Result =
     try
       wms_engine_task_executor:execute(Rules, TaskName, TaskInstanceID),
@@ -326,21 +507,54 @@ execute_wrapper(Rules, TaskInstanceID, TaskName) ->
         {error, Error}
     end,
   ?debug("~s/~s task stopped with result ~p", [TaskName, TaskInstanceID, Result]),
-  exit(Result).
+  exit({TaskType, TaskName, Result}).
 
--spec add_task(binary(), pid(), state()) ->
+-spec add_task(binary(), binary(), pid(), state()) ->
   state().
-add_task(TaskInstanceID, Pid, #state{task_processes = TaskProcesses} = State) ->
-  State#state{task_processes = TaskProcesses#{
-    TaskInstanceID => Pid,
-    Pid => TaskInstanceID
-  }}.
+add_task(TaskName, TaskInstanceID, Pid, #state{task_processes    = TaskProcesses,
+                                               taskdef_instances = Instances,
+                                               task_status       = TaskStatus} = State) ->
 
--spec rem_task(map(), pid(), binary()) ->
+  NewInstances =
+    lists:map(
+      fun
+        ({#taskdef{task_name = N} = TD, Inst} = Entry) when N =:= TaskName ->
+          case lists:member(TaskInstanceID, Inst) of
+            true ->
+              Entry;
+            false ->
+              {TD, [TaskInstanceID | Inst]};
+            (Other) ->
+              Other
+          end;
+        (Other) ->
+          Other
+      end, Instances),
+
+  TS = {running, wms_common:timestamp(), undefined},
+
+  State#state{task_processes    = TaskProcesses#{TaskInstanceID => Pid,
+                                                 Pid => TaskInstanceID},
+              taskdef_instances = NewInstances,
+              task_status       = TaskStatus#{TaskInstanceID => TS}}.
+
+-spec rem_task(pid(), binary(), state()) ->
   map().
-rem_task(TaskProcesses, Pid, TaskInstanceID) ->
-  maps:remove(TaskInstanceID, (maps:remove(Pid, TaskProcesses))).
-
+rem_task(Pid, TaskInstanceID,
+         #state{task_processes    = TaskProcesses,
+                taskdef_instances = Instances,
+                task_status       = TaskStatus} = State) ->
+  NewTaskProcesses = maps:remove(TaskInstanceID, (maps:remove(Pid, TaskProcesses))),
+  NewInstances =
+    lists:map(
+      fun({Def, Inst}) ->
+        {Def, lists:delete(TaskInstanceID, Inst)}
+      end, Instances),
+  State#state{
+    task_processes    = NewTaskProcesses,
+    taskdef_instances = NewInstances,
+    task_status       = maps:remove(TaskInstanceID, TaskStatus)
+  }.
 
 -spec task_exited(pid(), state()) ->
   state().
@@ -349,7 +563,7 @@ task_exited(Pid, #state{task_processes = TaskProcesses} = State) ->
     undefined ->
       State;
     TaskInstanceID ->
-      State#state{task_processes = rem_task(TaskProcesses, Pid, TaskInstanceID)}
+      rem_task(Pid, TaskInstanceID, State)
   end.
 
 -spec process_incoming_event(binary(), binary(), state()) ->
