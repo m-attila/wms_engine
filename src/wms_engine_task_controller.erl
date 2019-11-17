@@ -447,7 +447,7 @@ start_new_task(#taskdef{task_name = TaskName,
   State;
 start_new_task(#taskdef{task_name  = TaskName,
                         definition = Rules,
-                        type       = Type} = TD,
+                        type       = Type},
                #state{taskdef_instances = Instances} = State) ->
 
   DisableStart =
