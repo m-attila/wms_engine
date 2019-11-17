@@ -7,7 +7,8 @@
    [kernel,
     stdlib,
     mnesia,
-    wms_cfg
+    wms_cfg,
+    crypto
    ]},
   {env,[]},
   {modules, [wms_engine, wms_engine_precomp, wms_engine_lang, wms_engine_db_state]},
