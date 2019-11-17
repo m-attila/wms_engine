@@ -209,6 +209,7 @@ get_task_definition(State, TaskName) ->
                definition => Definition,
                type => Type}};
       Other ->
+        ?error("ENG-0001", "Task definition for ~s does not exists", [TaskName]),
         {error, Other}
     end,
   {State, Reply}.

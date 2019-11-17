@@ -10,6 +10,7 @@
 -author("Attila Makra").
 -behaviour(wms_state_variables).
 
+-include_lib("wms_logger/include/wms_logger.hrl").
 -include_lib("wms_state/include/wms_state.hrl").
 -include("wms_engine_lang.hrl").
 %% API
@@ -28,19 +29,28 @@
                    Reference :: variable_reference()) ->
                     {ok, Value :: literal()} | {error, Reason :: term()}.
 
-get_variable(#{private := PrivateVars} = Environment, {private, VariableID}) ->
+get_variable(#{private := PrivateVars,
+               task_name := TaskName,
+               task_instance_id := TaskInstanceID} = Environment, {private, VariableID}) ->
   % private variables are stored in Environment
   % {not_found, variable, RetValParName, State}
   case maps:get(VariableID, PrivateVars, undefined) of
     undefined ->
+      ?error("TSK-0001", "~s private variable does not exists, for ~s task,
+      in instance ~s.",
+             [VariableID, TaskName, TaskInstanceID]),
       {error, {not_found, variable, VariableID, Environment}};
     Value ->
       {ok, Value}
   end;
-get_variable(Environment, {global, VariableID}) ->
+get_variable(#{task_name := TaskName,
+               task_instance_id := TaskInstanceID} =Environment, {global, VariableID}) ->
   % global variables are stored in database
   case wms_db:get_global_variable(VariableID) of
     not_found ->
+      ?error("TSK-0002", "~s global variable does not exists, for ~s task,
+      in instance ~s.",
+             [VariableID, TaskName, TaskInstanceID]),
       {error, {not_found, variable, VariableID, Environment}};
     Value ->
       {ok, Value}

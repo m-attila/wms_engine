@@ -10,6 +10,7 @@
 -author("Attila Makra").
 
 -include("wms_engine_lang.hrl").
+-include_lib("wms_logger/include/wms_logger.hrl").
 
 %% API
 -export([execute/3]).
@@ -37,6 +38,9 @@ execute(Rules, TaskName, TaskInstanceID) ->
     Ret
   catch
     C:E:St ->
+      ?error("TSK-0018",
+             "~s instance of ~s task was failed. ~s:~0p~n~0p",
+             [TaskInstanceID, TaskName, C, E, St]),
       wms_engine_lang_impl:log_task_status(State, aborted, {C, E, St}),
       throw(E)
   end.

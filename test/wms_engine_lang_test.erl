@@ -84,7 +84,10 @@ execute_test() ->
     fun() ->
       {ok, Compiled} = wms_engine_precomp:compile(Rules),
       AllID = wms_engine_precomp:get_ids(Compiled),
-      State = #{impl => wms_engine_lang_adapter, executed => #{}},
+      State = #{impl => wms_engine_lang_adapter,
+                executed => #{},
+                task_name => <<"T1">>,
+                task_instance_id => <<"ID1">>},
       {ok, NewState} = wms_engine_lang:execute(Compiled, State),
 
       % execute with result true
@@ -163,7 +166,10 @@ execute_test() ->
     fun() ->
       {ok, Compiled} = wms_engine_precomp:compile(Rules1),
       AllID = wms_engine_precomp:get_ids(Compiled),
-      State = #{impl => wms_engine_lang_adapter, executed => #{}},
+      State = #{impl => wms_engine_lang_adapter,
+                executed => #{},
+                task_name => <<"T1">>,
+                task_instance_id => <<"ID1">>},
       NewState =
         try
           wms_engine_lang:execute(Compiled, State),
@@ -267,7 +273,10 @@ execute_test() ->
     fun() ->
       {ok, Compiled} = wms_engine_precomp:compile(Rules1),
       AllID = wms_engine_precomp:get_ids(Compiled),
-      State = #{impl => wms_engine_lang_adapter, executed => #{}},
+      State = #{impl => wms_engine_lang_adapter,
+                executed => #{},
+                task_name => <<"T1">>,
+                task_instance_id => <<"ID1">>},
       NewState =
         try
           wms_engine_lang:execute(Compiled, State),
@@ -338,7 +347,10 @@ execute_cmd_test() ->
 
       {ok, Compiled} = wms_engine_precomp:compile(Rules),
       AllID = wms_engine_precomp:get_ids(Compiled),
-      State = #{impl => wms_engine_lang_adapter, executed => #{}},
+      State = #{impl => wms_engine_lang_adapter,
+                executed => #{},
+                task_name => <<"T1">>,
+                task_instance_id => <<"ID1">>},
       try
         wms_engine_lang:execute(Compiled, State),
         ?assert(false)
@@ -376,7 +388,10 @@ execute_cmd_test() ->
 
       {ok, Compiled} = wms_engine_precomp:compile(Rules1),
       AllID = wms_engine_precomp:get_ids(Compiled),
-      State = #{impl => wms_engine_lang_adapter, executed => #{}},
+      State = #{impl => wms_engine_lang_adapter,
+                executed => #{},
+                task_name => <<"T1">>,
+                task_instance_id => <<"ID1">>},
       try
         wms_engine_lang:execute(Compiled, State),
         ?assert(false)
@@ -409,7 +424,10 @@ execute_cmd_test() ->
     fun() ->
       {ok, Compiled} = wms_engine_precomp:compile(Rules2),
       AllID = wms_engine_precomp:get_ids(Compiled),
-      State = #{impl => wms_engine_lang_adapter, executed => #{}},
+      State = #{impl => wms_engine_lang_adapter,
+                executed => #{},
+                task_name => <<"T1">>,
+                task_instance_id => <<"ID1">>},
       {ok, NewState} = wms_engine_lang:execute(Compiled, State),
       assert_exec_result(
         NewState, AllID,
@@ -468,7 +486,10 @@ execute_move_test() ->
 
       {ok, Compiled} = wms_engine_precomp:compile(Rules),
       AllID = wms_engine_precomp:get_ids(Compiled),
-      State = #{impl => wms_engine_lang_adapter, executed => #{}},
+      State = #{impl => wms_engine_lang_adapter,
+                executed => #{},
+                task_name => <<"T1">>,
+                task_instance_id => <<"ID1">>},
       NewState =
         try
           wms_engine_lang:execute(Compiled, State),
@@ -519,7 +540,10 @@ execute_move_test() ->
 
       {ok, Compiled} = wms_engine_precomp:compile(Rules1),
       AllID = wms_engine_precomp:get_ids(Compiled),
-      State = #{impl => wms_engine_lang_adapter, executed => #{}},
+      State = #{impl => wms_engine_lang_adapter,
+                executed => #{},
+                task_name => <<"T1">>,
+                task_instance_id => <<"ID1">>},
       NewState =
         try
           wms_engine_lang:execute(Compiled, State),
@@ -573,7 +597,10 @@ eval_comp_test() ->
   VarB2 = {global, <<"VarB2">>},
   ValB2 = true,
 
-  State = #{impl => wms_engine_lang_adapter, executed => #{}},
+  State = #{impl => wms_engine_lang_adapter,
+            executed => #{},
+            task_name => <<"T1">>,
+            task_instance_id => <<"ID1">>},
   TestFun =
     fun() ->
       test_comparsion(VarS1, VarS2, ValS1, ValS2, State),
@@ -627,7 +654,10 @@ test_comparsion(VarS1, VarS2, ValS1, ValS2, State) ->
 
 
 eval_boolean_test() ->
-  State = #{impl => wms_engine_lang_adapter, executed => #{}},
+  State = #{impl => wms_engine_lang_adapter,
+            executed => #{},
+            task_name => <<"T1">>,
+            task_instance_id => <<"ID1">>},
   TestFun =
     fun() ->
       ?assertMatch({true, _}, wms_engine_lang:eval_bo('and', true, true, State)),

@@ -248,9 +248,12 @@ private_var_test(_Config) ->
   Value = 123,
   VariableIDNotFnd = <<"notfoundvar">>,
 
-  Env = #{private => #{
-    VariableIDFnd => Value
-  }},
+  Env = #{
+          private => #{
+            VariableIDFnd => Value},
+          task_name => <<"T1">>,
+          task_instance_id => <<"ID1">>
+        },
 
   ?assertEqual({error,
                 {not_found, variable, VariableIDNotFnd, Env}},
@@ -286,7 +289,8 @@ global_var_test(_Config) ->
   Value = 123,
   VariableID = <<"var1">>,
 
-  Env = #{},
+  Env = #{task_name => <<"T1">>,
+          task_instance_id => <<"ID1">>},
 
   ?assertEqual({error,
                 {not_found, variable, VariableID, Env}},
@@ -322,7 +326,9 @@ transaction_var_test(_Config) ->
   VariablePID = <<"var1">>,
   VariableGID = <<"var2">>,
 
-  Env = #{private => #{}},
+  Env = #{private => #{},
+          task_name => <<"T1">>,
+          task_instance_id => <<"ID1">>},
 
   % success
 

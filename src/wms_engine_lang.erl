@@ -185,7 +185,9 @@ execute_entry(_, Result, State) ->
 -spec parallel([compiled_interaction()], engine_state()) ->
   {ok, execution_result(), engine_state()}.
 % execute parallel interaction calls
-parallel(ParallelInteractions, #{impl := Impl} = State) ->
+parallel(ParallelInteractions, #{impl := Impl,
+                                 task_name := TaskName,
+                                 task_instance_id := TaskInstanceID} = State) ->
   ExecFun =
     fun({ID, _} = Entry, PState) ->
       Result = get_execution_result(ID, PState),
@@ -212,6 +214,9 @@ parallel(ParallelInteractions, #{impl := Impl} = State) ->
       % no errors was found
       {ok, true, MergedState};
     _ ->
+      ?error("TSK-0003", "An error occured in parallel execution, ~s "
+                         "instance of ~s task. Interactions: ~0p, errors: ~0p",
+             [TaskInstanceID, TaskName, ParallelInteractions, Errors]),
       throw({parallel_errors, lists:usort(Errors), MergedState})
   end.
 
@@ -235,7 +240,10 @@ create_parameter_values(#{impl :=Impl} = State, ParameterSpec) ->
 -spec process_return_values([return_value_spec()],
                             return_values(), engine_state()) ->
                              {ok, engine_state()}.
-process_return_values(ReturnValueSpec, ReturnValues, #{impl := Impl} = State) ->
+process_return_values(ReturnValueSpec, ReturnValues,
+                      #{impl := Impl,
+                        task_name := TaskName,
+                        task_instance_id := TaskInstanceID} = State) ->
   {ok, lists:foldl(
     fun({RetValParName, Destination}, PState) ->
       case maps:is_key(RetValParName, ReturnValues) of
@@ -246,6 +254,10 @@ process_return_values(ReturnValueSpec, ReturnValues, #{impl := Impl} = State) ->
                                            false),
           NState;
         false ->
+          ?error("TSK-0004", "Interaction return value was not found ~s "
+                             "instance of ~s task, variable: ~s", [TaskInstanceID,
+                                                                   TaskName,
+                                                                   RetValParName]),
           throw({not_found, retval, RetValParName, PState})
       end
     end, State, ReturnValueSpec)}.
@@ -309,7 +321,10 @@ eval_bo('xor', Logical1, Logical2, State) ->
   {Logical1 xor Logical2, State};
 eval_bo('set', Logical1, undefined, State) ->
   {Logical1, State};
-eval_bo(Invalid, _, _, State) ->
+eval_bo(Invalid, _, _, #{task_name := TaskName,
+                         task_instance_id := TaskInstanceID} = State) ->
+  ?error("TSK-0005", "Invalid logical operator ~s in ~s instance of ~s task",
+         [Invalid, TaskInstanceID, TaskName]),
   throw({invalid, bool_op, Invalid, State}).
 
 %% -----------------------------------------------------------------------------
@@ -351,7 +366,10 @@ eval_co('<=', Val1, Val2, State) ->
   {Val1 =< Val2, State};
 eval_co('!=', Val1, Val2, State) ->
   {Val1 =/= Val2, State};
-eval_co(Invalid, _, _, State) ->
+eval_co(Invalid, _, _, #{task_name := TaskName,
+                         task_instance_id := TaskInstanceID} = State) ->
+  ?error("TSK-0006", "Invalid comparator operator ~s in ~s instance of ~s task",
+         [Invalid, TaskInstanceID, TaskName]),
   throw({invalid, eval_co, Invalid, State}).
 
 %% -----------------------------------------------------------------------------
@@ -362,10 +380,14 @@ eval_co(Invalid, _, _, State) ->
                     destination(), engine_state()) ->
                      {ok, engine_state()}.
 
-move_variable(Source, Destination, #{impl := Impl} = State) ->
+move_variable(Source, Destination, #{impl := Impl,
+                                     task_name := TaskName,
+                                     task_instance_id := TaskInstanceID} = State) ->
   try
     {ok, _NewState} = wms_state:move_var(Source, Destination, Impl, State)
   catch error : {badmatch, {error, R}} ->
-    ?error("move_variable: ~p -> ~p", [Source, Destination]),
+    ?error("TSK-0007", "Move variable operation was failed in ~s "
+                       "instance of ~ task: ~p -> ~p",
+           [TaskInstanceID, TaskName, Source, Destination]),
     throw(R)
   end.

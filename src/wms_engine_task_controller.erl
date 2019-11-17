@@ -196,7 +196,8 @@ handle_call({manual_start_task, TaskName}, _Form,
   {Reply, NewState} = start_new_task_by_name(TaskName, State),
   {reply, Reply, NewState};
 handle_call({manual_start_task, TaskName}, _Form, State) ->
-  ?error("Cannot be start ~s task, because controller not initialized yet",
+  ?error("TSK-0008",
+         "Cannot be start ~s task, because controller not initialized yet",
          [TaskName]),
   {reply, {error, not_initialized}, State};
 
@@ -204,7 +205,8 @@ handle_call({event_fired, TaskInstanceID, EventID}, _From,
             #state{phase = started} = State) ->
   {reply, process_incoming_event(TaskInstanceID, EventID, State), State};
 handle_call({event_fired, _, EventID}, _From, State) ->
-  ?warning("Not initialized yet, ~s event notification dropped", [EventID]),
+  ?error("TSK-0009",
+         "Controller was not initialized yet, ~s event notification dropped", [EventID]),
   {reply, {error, not_initialized}, State};
 
 handle_call({interaction_reply,
@@ -216,10 +218,12 @@ handle_call({interaction_reply,
                                     Reply,
                                     State), State};
 handle_call({interaction_reply,
-             _TaskInstanceID, InteractionID, _InteractionRequestID, _Reply},
+             TaskInstanceID, InteractionID, _InteractionRequestID, _Reply},
             _From, State) ->
-  ?warning("Not initialized yet, interaction reply was dropped ~s",
-           [InteractionID]),
+  ?error("TSK-0010",
+         "Controller was not initialized yet, ~s interaction "
+         "reply was dropped for ~s task instance",
+         [InteractionID, TaskInstanceID]),
   {reply, {error, not_initialized}, State};
 
 handle_call({keepalive,
@@ -246,6 +250,8 @@ handle_call({delete_task_definition, TaskName}, _From,
   Reply =
     case Instances of
       NewInstances ->
+        ?error("TSK-0011",
+               "~s task cannot be deleted, because does not found", [TaskName]),
         {error, not_found};
       _ ->
         ?info("~s task definition was deleted", [TaskName]),
@@ -303,7 +309,8 @@ handle_call({stop_task, TaskInstanceID}, _From,
   Reply =
     case maps:get(TaskInstanceID, Processes, undefined) of
       undefined ->
-        ?error("~s task instance not running", [TaskInstanceID]),
+        ?error("TSK-0012", "Cannot be stop ~s task instance, it is not running",
+               [TaskInstanceID]),
         {error, not_found};
       Pid ->
         ?debug("stop command was send to ~s task instance", [TaskInstanceID]),
@@ -425,7 +432,7 @@ setup_timer_event() ->
 start_new_task_by_name(TaskName, State) ->
   case wms_db:get_taskdef(TaskName) of
     not_found ->
-      ?error("~s task definition was not found", [TaskName]),
+      ?error("TSK-0013", "Cannot be start ~s task, it is not found", [TaskName]),
       {{error, not_found}, State};
     TaskDef ->
       {ok, start_new_task(TaskDef, State)}
@@ -435,7 +442,8 @@ start_new_task_by_name(TaskName, State) ->
   state().
 start_new_task(#taskdef{task_name = TaskName,
                         type      = disabled}, State) ->
-  ?error("~s task was not started, because it is disabled", [TaskName]),
+  ?error("TSK-0014",
+         "Cannot be start ~s task, task it is disabled", [TaskName]),
   State;
 start_new_task(#taskdef{task_name  = TaskName,
                         definition = Rules,
@@ -502,8 +510,9 @@ execute_wrapper(Rules, TaskType, TaskInstanceID, TaskName) ->
       wms_db:remove_task_instance(TaskName, TaskInstanceID)
     catch
       _:Error:St ->
-        ?error("~s/~s task stopped with error: ~p~n~p",
-               [TaskName, TaskInstanceID, Error, St]),
+        ?error("TSK-0015",
+               "~s instance of ~s task stopped with error: ~0p~n~0p",
+               [TaskInstanceID, TaskName, Error, St]),
         {error, Error}
     end,
   ?debug("~s/~s task stopped with result ~p", [TaskName, TaskInstanceID, Result]),
@@ -572,7 +581,9 @@ process_incoming_event(TaskInstanceID,
                        EventID, #state{task_processes = TaskProcesses}) ->
   case maps:get(TaskInstanceID, TaskProcesses, undefined) of
     undefined ->
-      ?warning("~s task instance ID does not exists", [TaskInstanceID]),
+      ?error("TSK-0016",
+        "~s task instance ID does not exists, ~s event "
+        "will not be delivered", [TaskInstanceID, EventID]),
       {error, not_found};
     Pid ->
       ?debug("~s task instance was advised for event ~s",
@@ -587,7 +598,10 @@ process_interaction_reply(TaskInstanceID, InteractionID, InteractionRequestID, R
                           #state{task_processes = TaskProcesses}) ->
   case maps:get(TaskInstanceID, TaskProcesses, undefined) of
     undefined ->
-      ?warning("~s task instance ID does not exists", [TaskInstanceID]),
+      ?error("TSK-0017",
+             "~s task instance ID does not exists, ~s request of ~s "
+             "interaction will not be delivered: ~0p",
+             [TaskInstanceID, InteractionRequestID, InteractionID, Reply]),
       {error, not_found};
     Pid ->
       ?debug("~s task instance was advised for ~s interaction result: ~p",
