@@ -98,9 +98,15 @@ execute_interaction(#{task_instance_id := TaskInstanceID} = State,
                                      InteractionRequestID,
                                      ParameterValues]),
 
-    ReturnValues = receive_interaction_messages(InteractionRequestID),
-
-    {ok, ReturnValues, State}
+    case receive_interaction_messages(InteractionRequestID) of
+      {ok, ReturnValues} ->
+        {ok, ReturnValues, State};
+      Error ->
+        ?error("TSK-0019",
+               "~s interaction reply for ~s task instance return with error: ~0p",
+               [InteractionID, TaskInstanceID, Error]),
+        throw(Error)
+    end
   after
     wms_engine_task_controller:change_task_status(TaskInstanceID,
                                                   running, undefined)

@@ -592,7 +592,10 @@ process_incoming_event(TaskInstanceID,
       ok
   end.
 
--spec process_interaction_reply(identifier_name(), identifier_name(), identifier_name(), map(), state()) ->
+-spec process_interaction_reply(identifier_name(),
+                                identifier_name(),
+                                identifier_name(),
+                                {ok, map()} | {error, term()}, state()) ->
   ok | {error, not_found}.
 process_interaction_reply(TaskInstanceID, InteractionID, InteractionRequestID, Reply,
                           #state{task_processes = TaskProcesses}) ->
