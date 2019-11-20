@@ -23,7 +23,7 @@
   1},
  {<<"wms_events">>,
   {git,"git@github.com:m-attila/wms_events.git",
-       {ref,"58ebbfe569766c696fd1b978ed8dbf14df5d1356"}},
+       {ref,"19398185630716a97e411afc5c968baffd7cec42"}},
   0},
  {<<"wms_logger">>,
   {git,"git@github.com:m-attila/wms_logger.git",
