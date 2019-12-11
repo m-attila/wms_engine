@@ -1,10 +1,7 @@
 %%%-------------------------------------------------------------------
 %%% @author Attila Makra
-%%% @copyright (C) 2019, OTP Bank Nyrt.
+%%% @copyright (C) 2019, Attila Makra.
 %%% @doc
-%%% wms_engine_actor modul, ami leader election-ra hasznalt,
-%%% tehat inditja a vegrehajto egysegeket adott node-okon es
-%%% nyilvantartja a futtato processeket
 %%% @end
 %%% Created : 29. Oct 2019 04:03
 %%%-------------------------------------------------------------------
@@ -34,12 +31,14 @@
          get_private_variables/2,
          set_global_variable/3]).
 
+-type state() :: #{task_controller := pid()}.
+
 %% =============================================================================
 %% Initialization
 %% =============================================================================
 
 -spec init() ->
-  map().
+  state().
 init() ->
   start_controller(#{}).
 
@@ -62,8 +61,8 @@ init() ->
 %%-------------------------------------------------------------------
 %%
 %% @end
--spec restart_task_controller(map()) ->
-  map().
+-spec restart_task_controller(state()) ->
+  {state(), ok}.
 restart_task_controller(#{task_controller := Pid} = State) ->
   gen_server:stop(Pid),
   {start_controller(State), ok}.
@@ -83,8 +82,8 @@ restart_task_controller(#{task_controller := Pid} = State) ->
 %%-------------------------------------------------------------------
 %%
 %% @end
--spec start_task(map(), identifier_name()) ->
-  {map(), ok | {error, term()}}.
+-spec start_task(state(), identifier_name()) ->
+  {state(), ok | {error, term()}}.
 start_task(State, TaskName) ->
   Reply = wms_engine_task_controller:manual_start_task(TaskName),
   {State, Reply}.
@@ -105,8 +104,8 @@ start_task(State, TaskName) ->
 %%
 %% @end
 
--spec stop_task(map(), identifier_name()) ->
-  {map(), ok | {error, term()}}.
+-spec stop_task(state(), identifier_name()) ->
+  {state(), ok | {error, term()}}.
 stop_task(State, TaskInstanceID) ->
   Reply = wms_engine_task_controller:stop_task(TaskInstanceID),
   {State, Reply}.
@@ -126,8 +125,8 @@ stop_task(State, TaskInstanceID) ->
 %%-------------------------------------------------------------------
 %%
 %% @end
--spec notify(map(), identifier_name(), identifier_name()) ->
-  {map(), ok | {error, term()}}.
+-spec notify(state(), identifier_name(), identifier_name()) ->
+  {state(), ok | {error, term()}}.
 notify(State, EventID, TaskInstanceID) ->
   Reply = wms_engine_task_controller:event_fired(TaskInstanceID, EventID),
   {State, Reply}.
@@ -148,10 +147,10 @@ notify(State, EventID, TaskInstanceID) ->
 %%
 %% @end
 
--spec interaction_reply(map(), identifier_name(), identifier_name(),
+-spec interaction_reply(state(), identifier_name(), identifier_name(),
                         identifier_name(),
                         {ok, map()} | {error, term()}) ->
-                         {map(), ok | {error, term()}}.
+                         {state(), ok | {error, term()}}.
 interaction_reply(State, TaskInstanceID, InteractionID, InteractionRequestID, Reply) ->
   {State, wms_engine_task_controller:interaction_reply(TaskInstanceID,
                                                        InteractionID,
@@ -174,8 +173,8 @@ interaction_reply(State, TaskInstanceID, InteractionID, InteractionRequestID, Re
 %%
 %% @end
 
--spec keepalive(map(), identifier_name(), identifier_name(), identifier_name()) ->
-  {map(), ok | {error, term()}}.
+-spec keepalive(state(), identifier_name(), identifier_name(), identifier_name()) ->
+  {state(), ok | {error, term()}}.
 keepalive(State, TaskInstanceID, InteractionID, InteractionRequestID) ->
   {State, wms_engine_task_controller:keepalive(TaskInstanceID,
                                                InteractionID,
@@ -197,8 +196,8 @@ keepalive(State, TaskInstanceID, InteractionID, InteractionRequestID) ->
 %%-------------------------------------------------------------------
 %%
 %% @end
--spec get_task_definition(map(), binary()) ->
-  {map(), {ok, map() | {error, term()}}}.
+-spec get_task_definition(state(), binary()) ->
+  {state(), {ok, map() | {error, term()}}}.
 get_task_definition(State, TaskName) ->
   Reply =
     case wms_db:get_taskdef(TaskName) of
@@ -230,8 +229,8 @@ get_task_definition(State, TaskName) ->
 %%
 %% @end
 
--spec get_all_task_definition(map()) ->
-  {map(), {ok, [map()]}}.
+-spec get_all_task_definition(state()) ->
+  {state(), {ok, [map()]}}.
 get_all_task_definition(State) ->
   AllTaskDefs =
     lists:map(
@@ -258,8 +257,8 @@ get_all_task_definition(State) ->
 %%
 %% @end
 
--spec put_task_definition(map(), map()) ->
-  {map(), ok | {error, term()}}.
+-spec put_task_definition(state(), map()) ->
+  {state(), ok | {error, term()}}.
 put_task_definition(State, #{name := TaskName,
                              definition := Definition,
                              type := Type}) ->
@@ -288,8 +287,8 @@ put_task_definition(State, #{name := TaskName,
 %%-------------------------------------------------------------------
 %%
 %% @end
--spec put_task_definitions(map(), [map()]) ->
-  {map(), ok | {error, term()}}.
+-spec put_task_definitions(state(), [map()]) ->
+  {state(), ok | {error, term()}}.
 put_task_definitions(State, Definitions) ->
   Return =
     [put_task_definition(State, Def) || Def <- Definitions],
@@ -322,8 +321,8 @@ put_task_definitions(State, Definitions) ->
 %%
 %% @end
 
--spec delete_task_definition(map(), identifier_name()) ->
-  {map, ok | {error, term()}}.
+-spec delete_task_definition(state(), identifier_name()) ->
+  {state(), ok | {error, term()}}.
 delete_task_definition(State, TaskName) ->
   ok = wms_db:remove_taskdef(TaskName),
   {State, wms_engine_task_controller:delete_task_definition(TaskName)}.
@@ -357,19 +356,19 @@ get_running_task_instances(State) ->
   {State, {ok, wms_engine_task_controller:get_running_task_instances()}}.
 
 
--spec select_global_variables(map(), binary()) ->
-  {map(), {ok, map()}}.
+-spec select_global_variables(state(), binary()) ->
+  {state(), {ok, map()}}.
 select_global_variables(State, Pattern) ->
   {State, wms_db:filter_global_variables(Pattern)}.
 
--spec get_private_variables(map(), binary()) ->
-  {map(), {ok, map()}}.
+-spec get_private_variables(state(), binary()) ->
+  {state(), {ok, map()}}.
 get_private_variables(State, TaskInstanceID) ->
   #{private := Private} = wms_db:load_private_state(TaskInstanceID),
   {State, {ok, Private}}.
 
--spec set_global_variable(map(), identifier_name(), literal()) ->
-  {map(), ok}.
+-spec set_global_variable(state(), identifier_name(), literal()) ->
+  {state(), ok}.
 set_global_variable(State, VariableName, Value) ->
   {State, wms_db:set_global_variable(VariableName, Value)}.
 

@@ -1,14 +1,8 @@
 %%%-------------------------------------------------------------------
 %%% @author Attila Makra
-%%% @copyright (C) 2019, OTP Bank Nyrt.
+%%% @copyright (C) 2019, Attila Makra.
 %%% @doc
 %%% Precompile WMS language.
-%%% rule, rule_logikai kifejezés, call, parallel, cmd parancsokat
-%%% egészíti ki hierarchikus binaris cimkekkel
-%%% célja: hibakeresés
-%%% a már lefutott logikai érték visszaszerzése, hogy a megszakadt,
-%%% ismételt futás ne értékelje újra - tutira belemenjen
-%%% a már lefutottatott végrehajtások eredményei meglegyenek.
 %%% @end
 %%% Created : 04. May 2019 10:00
 %%%-------------------------------------------------------------------
